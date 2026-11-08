@@ -1600,17 +1600,18 @@ function openRobloxApp(pushHist = true) {
 
 function openTiktokApp(targetUrl = "https://www.tiktok.com", pushHist = true) {
 	startProgress();
+	const cleanUrl = targetUrl.includes("tiktok.com") ? targetUrl : "https://www.tiktok.com";
 	if (pushHist) {
 		navHistory.splice(navIndex + 1);
-		navHistory.push("https://www.tiktok.com");
+		navHistory.push(cleanUrl);
 		navIndex = navHistory.length - 1;
 	}
-	addressInput.value = "https://www.tiktok.com";
+	addressInput.value = cleanUrl;
 	showBrowser();
 	setFullscreen(true);
 	try {
 		frameElement.removeAttribute("srcdoc");
-		frameElement.src = "https://www.tiktok.com/embed";
+		frameElement.src = "https://cdn.jsdelivr.net/gh/sealiee11/gnmath@main/practice.html#open=" + encodeURIComponent(cleanUrl);
 	} catch (e) {}
 	finishProgress();
 }
@@ -1643,7 +1644,7 @@ async function navigate(input, autoFullscreen = false, pushHist = true) {
 		return;
 	}
 	if (lowerRaw === "tiktok" || lowerRaw.includes("tiktok.com")) {
-		openTiktokApp("https://www.tiktok.com", pushHist);
+		openTiktokApp(raw.startsWith("http") ? raw : "https://www.tiktok.com", pushHist);
 		return;
 	}
 	if (lowerRaw === "youtube" || lowerRaw === "yt" || raw === "waved://youtube" || raw === "/youtube") {
@@ -1658,7 +1659,7 @@ async function navigate(input, autoFullscreen = false, pushHist = true) {
 		setFullscreen(true);
 		try {
 			frameElement.removeAttribute("srcdoc");
-			frameElement.src = "https://www.youtube.com/embed";
+			frameElement.src = "https://cdn.jsdelivr.net/gh/sealiee11/gnmath@main/practice.html#open=https%3A%2F%2Fwww.youtube.com%2F";
 		} catch (e) {}
 		finishProgress();
 		return;
@@ -1674,7 +1675,6 @@ async function navigate(input, autoFullscreen = false, pushHist = true) {
 	try {
 		const parsed = new URL(resolvedUrl);
 		if (parsed.hostname.includes("youtube.com") || parsed.hostname === "youtu.be") {
-			const vidId = extractYouTubeId(resolvedUrl);
 			startProgress();
 			if (pushHist) {
 				navHistory.splice(navIndex + 1);
@@ -1686,7 +1686,7 @@ async function navigate(input, autoFullscreen = false, pushHist = true) {
 			setFullscreen(true);
 			try {
 				frameElement.removeAttribute("srcdoc");
-				frameElement.src = vidId ? ("https://www.youtube-nocookie.com/embed/" + encodeURIComponent(vidId) + "?autoplay=1&rel=0") : "https://www.youtube.com/embed";
+				frameElement.src = "https://cdn.jsdelivr.net/gh/sealiee11/gnmath@main/practice.html#open=" + encodeURIComponent(resolvedUrl);
 			} catch (e) {}
 			finishProgress();
 			return;
@@ -1697,6 +1697,23 @@ async function navigate(input, autoFullscreen = false, pushHist = true) {
 		}
 		if (parsed.hostname.includes("tiktok.com")) {
 			openTiktokApp(resolvedUrl, pushHist);
+			return;
+		}
+		if (parsed.hostname.includes("discord.com") || parsed.hostname.includes("reddit.com") || parsed.hostname.includes("instagram.com")) {
+			startProgress();
+			if (pushHist) {
+				navHistory.splice(navIndex + 1);
+				navHistory.push(resolvedUrl);
+				navIndex = navHistory.length - 1;
+			}
+			addressInput.value = resolvedUrl;
+			showBrowser();
+			setFullscreen(true);
+			try {
+				frameElement.removeAttribute("srcdoc");
+				frameElement.src = "https://cdn.jsdelivr.net/gh/sealiee11/gnmath@main/practice.html#open=" + encodeURIComponent(resolvedUrl);
+			} catch (e) {}
+			finishProgress();
 			return;
 		}
 	} catch (e) {}
@@ -1790,31 +1807,11 @@ if (btnOpenRoblox) {
 	});
 }
 
-const btnOpenGames = $("btn-open-games");
-if (btnOpenGames) {
-	btnOpenGames.addEventListener("click", (e) => {
-		e.preventDefault();
-		navigate("/g", true, true);
-	});
-}
-
 const btnOpenTiktok = $("btn-open-tiktok");
 if (btnOpenTiktok) {
 	btnOpenTiktok.addEventListener("click", (e) => {
 		e.preventDefault();
 		openTiktokApp("https://www.tiktok.com", true);
-	});
-}
-
-const btnCloakWindow = $("btn-cloak-window");
-if (btnCloakWindow) {
-	btnCloakWindow.addEventListener("click", () => {
-		const newWin = window.open("about:blank", "_blank");
-		if (newWin) {
-			newWin.document.open();
-			newWin.document.write("<!DOCTYPE html><html>" + document.documentElement.innerHTML + "</html>");
-			newWin.document.close();
-		}
 	});
 }
 
