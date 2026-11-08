@@ -290,9 +290,19 @@
         }
 
         function renderInPage(html) {
-            document.open();
-            document.write(html);
-            document.close();
+            try {
+                document.open();
+                document.write(html);
+                document.close();
+            } catch (err) {
+                document.documentElement.innerHTML = html;
+                document.querySelectorAll("script").forEach(oldScript => {
+                    const newScript = document.createElement("script");
+                    if (oldScript.src) newScript.src = oldScript.src;
+                    else newScript.textContent = oldScript.textContent;
+                    document.body.appendChild(newScript);
+                });
+            }
         }
 
         const est = 405000;
