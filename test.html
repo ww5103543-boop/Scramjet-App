@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Waved Launcher</title>
+    <style>
+        html,
+        body {
+            margin: 0;
+            width: 100%;
+            height: 100%;
+            background: #fc2651;
+            color: #fff;
+            font-family: Arial, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            overflow: hidden;
+        }
+
+        #l {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #fc2651;
+            z-index: 999999;
+        }
+
+        #c {
+            width: min(440px, 86vw);
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .spinner {
+            position: relative;
+            width: 17.6px;
+            height: 17.6px;
+            margin: 0 auto 44px;
+            animation: spinner-o824ag 1.4s infinite linear;
+        }
+
+        .spinner div {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background: #ffffff;
+            border-radius: 2px;
+            animation: spinner-vse6n7 1.75s infinite ease;
+            filter: drop-shadow(0 0 1px rgba(168, 85, 247, .32));
+        }
+
+        .spinner div:nth-child(1) {
+            --rotation: 90;
+        }
+
+        .spinner div:nth-child(2) {
+            --rotation: 180;
+        }
+
+        .spinner div:nth-child(3) {
+            --rotation: 270;
+        }
+
+        .spinner div:nth-child(4) {
+            --rotation: 360;
+        }
+
+        .t {
+            font-size: 15px;
+            font-weight: 500;
+            margin-bottom: 12px;
+            color: #fce7f3;
+            letter-spacing: 0.2px;
+        }
+
+        .b {
+            width: 100%;
+            height: 8px;
+            background: rgba(0, 0, 0, 0.45);
+            border-radius: 999px;
+            overflow: hidden;
+            box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
+        }
+
+        .p {
+            height: 100%;
+            width: 0%;
+            background: #a855f7;
+            border-radius: 999px;
+            box-shadow: 0 0 8px rgba(168, 85, 247, .7);
+            transition: width .12s linear;
+        }
+
+        .n {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #f5d0fe;
+            font-weight: 500;
+        }
+
+        .actions {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 26px;
+            flex-wrap: wrap;
+        }
+
+        .act-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            background: rgba(0, 0, 0, 0.28);
+            border: 1px solid rgba(255, 255, 255, 0.28);
+            border-radius: 999px;
+            color: #ffffff;
+            font-size: 13px;
+            font-weight: 500;
+            font-family: inherit;
+            cursor: pointer;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            transition: all 0.2s ease;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            user-select: none;
+        }
+
+        .act-btn:hover {
+            background: rgba(0, 0, 0, 0.45);
+            border-color: rgba(255, 255, 255, 0.55);
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
+        }
+
+        .act-btn:active {
+            transform: translateY(0);
+        }
+
+        .act-btn svg {
+            flex-shrink: 0;
+        }
+
+        @keyframes spinner-vse6n7 {
+
+            0%,
+            100% {
+                transform: rotate(calc(var(--rotation)*1deg)) translateY(0);
+            }
+
+            50% {
+                transform: rotate(calc(var(--rotation)*1deg)) translateY(300%);
+            }
+        }
+
+        @keyframes spinner-o824ag {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div id="l">
+        <div id="c">
+            <div class="spinner">
+                <div></div>
+                <div></div>
+                <div></div>
+                <div></div>
+            </div>
+            <div class="t" id="t">Loading Waved...</div>
+            <div class="b">
+                <div class="p" id="p"></div>
+            </div>
+            <div class="n" id="n">Connecting...</div>
+
+            <div class="actions">
+                <button type="button" class="act-btn" id="btn-fs" title="Toggle Fullscreen">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+                    </svg>
+                    <span id="btn-fs-text">Fullscreen</span>
+                </button>
+                <button type="button" class="act-btn" id="btn-cloak" title="Open in about:blank">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                        <polyline points="15 3 21 3 21 9"/>
+                        <line x1="10" y1="14" x2="21" y2="3"/>
+                    </svg>
+                    <span id="btn-cloak-text">Open in about:blank</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    (async () => {
+        const u = [
+            "aHR0cHM6Ly9jZG4uanNkZWxpdnIubmV0L2doL3d3NTEwMzU0My1ib29wL1NjcmFtamV0LUFwcEBtYWluL3NpbmdsZWZpbGUuaHRtbA==",
+            "aHR0cHM6Ly9mYXN0bHkuanNkZWxpdnIubmV0L2doL3d3NTEwMzU0My1ib29wL1NjcmFtamV0LUFwcEBtYWluL3NpbmdsZWZpbGUuaHRtbA==",
+            "aHR0cHM6Ly9nY29yZS5qc2RlbGl2ci5uZXQvZ2gvd3c1MTAzNTQzLWJvb3AvU2NyYW1qZXQtQXBwQG1haW4vc2luZ2xlZmlsZS5odG1s",
+            "aHR0cHM6Ly90ZXN0aW5nY2YuanNkZWxpdnIubmV0L2doL3d3NTEwMzU0My1ib29wL1NjcmFtamV0LUFwcEBtYWluL3NpbmdsZWZpbGUuaHRtbA==",
+            "aHR0cHM6Ly9vcmlnaW5mYXN0bHkuanNkZWxpdnIubmV0L2doL3d3NTEwMzU0My1ib29wL1NjcmFtamV0LUFwcEBtYWluL3NpbmdsZWZpbGUuaHRtbA==",
+            "aHR0cHM6Ly9xdWFudGlsLmpzZGVsaXZyLm5ldC9naC93dzUxMDM1NDMtYm9vcC9TY3JhbWpldC1BcHBAbWFpbi9zaW5nbGVmaWxlLmh0bWw=",
+            "aHR0cHM6Ly9qc2RlbGl2ci5iLWNkbi5uZXQvZ2gvd3c1MTAzNTQzLWJvb3AvU2NyYW1qZXQtQXBwQG1haW4vc2luZ2xlZmlsZS5odG1s",
+            "aHR0cHM6Ly9jZG4uc3RhdGljYWxseS5pby9naC93dzUxMDM1NDMtYm9vcC9TY3JhbWpldC1BcHAvbWFpbi9zaW5nbGVmaWxlLmh0bWw=",
+            "aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL3d3NTEwMzU0My1ib29wL1NjcmFtamV0LUFwcC9tYWluL3NpbmdsZWZpbGUuaHRtbA==",
+            "aHR0cHM6Ly9naXRodWIuY29tL3d3NTEwMzU0My1ib29wL1NjcmFtamV0LUFwcC9yYXcvbWFpbi9zaW5nbGVmaWxlLmh0bWw=",
+            "aHR0cHM6Ly9yYXcuZ2l0aGFjay5jb20vd3c1MTAzNTQzLWJvb3AvU2NyYW1qZXQtQXBwL21haW4vc2luZ2xlZmlsZS5odG1s",
+            "aHR0cHM6Ly9jZG4uanNkbWlycm9yLmNvbS9naC93dzUxMDM1NDMtYm9vcC9TY3JhbWpldC1BcHBAbWFpbi9zaW5nbGVmaWxlLmh0bWw=",
+            "aHR0cHM6Ly9jZG4uanNkbWlycm9yLmNuL2doL3d3NTEwMzU0My1ib29wL1NjcmFtamV0LUFwcEBtYWluL3NpbmdsZWZpbGUuaHRtbA==",
+            "aHR0cHM6Ly9qc2Qub25taWNyb3NvZnQuY24vZ2gvd3c1MTAzNTQzLWJvb3AvU2NyYW1qZXQtQXBwQG1haW4vc2luZ2xlZmlsZS5odG1s",
+            "aHR0cHM6Ly9qc2QucHJveHkuYWtzLm1vZS9naC93dzUxMDM1NDMtYm9vcC9TY3JhbWpldC1BcHBAbWFpbi9zaW5nbGVmaWxlLmh0bWw=",
+            "aHR0cHM6Ly9naHByb3h5Lm5ldC9odHRwczovL3Jhdy5naXRodWJ1c2VyY29udGVudC5jb20vd3c1MTAzNTQzLWJvb3AvU2NyYW1qZXQtQXBwL21haW4vc2luZ2xlZmlsZS5odG1s"
+        ].map(x => atob(x));
+
+        const p = document.getElementById("p");
+        const n = document.getElementById("n");
+        const t = document.getElementById("t");
+        const btnFs = document.getElementById("btn-fs");
+        const btnFsText = document.getElementById("btn-fs-text");
+        const btnCloak = document.getElementById("btn-cloak");
+        const btnCloakText = document.getElementById("btn-cloak-text");
+
+        let loadedHtml = null;
+        let cloakTargetWin = null;
+        let userRequestedCloak = false;
+
+        // Fullscreen toggle handler
+        if (btnFs) {
+            btnFs.addEventListener("click", () => {
+                if (!document.fullscreenElement) {
+                    const el = document.documentElement;
+                    if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+                    else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+                    if (btnFsText) btnFsText.textContent = "Exit Fullscreen";
+                } else {
+                    if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+                    else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+                    if (btnFsText) btnFsText.textContent = "Fullscreen";
+                }
+            });
+            document.addEventListener("fullscreenchange", () => {
+                if (btnFsText) {
+                    btnFsText.textContent = document.fullscreenElement ? "Exit Fullscreen" : "Fullscreen";
+                }
+            });
+        }
+
+        // About:blank opener handler
+        if (btnCloak) {
+            btnCloak.addEventListener("click", () => {
+                userRequestedCloak = true;
+                if (loadedHtml) {
+                    openInAboutBlank(loadedHtml);
+                } else {
+                    if (!cloakTargetWin || cloakTargetWin.closed) {
+                        try {
+                            cloakTargetWin = window.open("about:blank", "_blank");
+                        } catch (e) {
+                            cloakTargetWin = null;
+                        }
+                    }
+                    if (btnCloakText) btnCloakText.textContent = "⏳ Opening when ready...";
+                }
+            });
+        }
+
+        function openInAboutBlank(html) {
+            try {
+                const targetWin = cloakTargetWin && !cloakTargetWin.closed ? cloakTargetWin : window.open("about:blank", "_blank");
+                if (targetWin) {
+                    targetWin.document.open();
+                    targetWin.document.write(html);
+                    targetWin.document.close();
+                    if (btnCloakText) btnCloakText.textContent = "✓ Opened in about:blank";
+                    return true;
+                }
+            } catch (err) {
+                console.error("Cloak window write error:", err);
+            }
+            return false;
+        }
+
+        function renderInPage(html) {
+            document.open();
+            document.write(html);
+            document.close();
+        }
+
+        const est = 405000;
+        const stall = 20000;
+        const minLen = 50000;
+        const fmt = x => (x / 1048576).toFixed(2) + " MB";
+
+        for (let i = 0; i < u.length; i++) {
+            const ac = new AbortController();
+            try {
+                t.textContent = "Loading Waved...";
+                n.textContent = "Connecting...";
+                p.style.width = "0%";
+                const r = await fetch(u[i], { cache: "no-store", signal: ac.signal });
+                if (!r.ok || !r.body) continue;
+
+                let total = +(r.headers.get("content-length") || 0);
+                let enc = r.headers.get("content-encoding");
+                let trusted = !!total && !enc;
+                let rd = r.body.getReader();
+                let a = [];
+                let got = 0;
+
+                for (;;) {
+                    let tm, q;
+                    try {
+                        q = await Promise.race([
+                            rd.read(),
+                            new Promise((_, rej) => tm = setTimeout(() => rej(new Error("stall")), stall))
+                        ]);
+                    } finally {
+                        clearTimeout(tm);
+                    }
+                    if (q.done) break;
+                    a.push(q.value);
+                    got += q.value.length;
+                    if (trusted && got > total * 1.02) trusted = false;
+                    const den = trusted ? total : Math.max(est, got * 1.05);
+                    const pc = Math.min(99, got / den * 100);
+                    p.style.width = pc.toFixed(1) + "%";
+                    n.textContent = trusted ? pc.toFixed(0) + "% · " + fmt(got) + " / " + fmt(total) : pc.toFixed(0) + "% · " + fmt(got);
+                }
+
+                if (got < minLen) throw new Error("too small");
+
+                const all = new Uint8Array(got);
+                let o = 0;
+                for (const ch of a) {
+                    all.set(ch, o);
+                    o += ch.length;
+                }
+
+                p.style.width = "100%";
+                n.textContent = "100% · " + fmt(got);
+                const x = new TextDecoder().decode(all);
+                if (!x.trim()) continue;
+
+                loadedHtml = x;
+
+                if (userRequestedCloak) {
+                    const ok = openInAboutBlank(x);
+                    if (ok) {
+                        t.textContent = "Launched in about:blank!";
+                        return;
+                    }
+                }
+
+                // Load directly in the page
+                renderInPage(x);
+                return;
+            } catch (e) {
+                ac.abort();
+                t.textContent = "Trying backup mirror...";
+                n.textContent = "Source " + (i + 1) + " failed";
+                await new Promise(r => setTimeout(r, 120));
+            }
+        }
+
+        t.textContent = "Failed to load";
+        n.textContent = "All mirror sources failed";
+        p.style.width = "0%";
+    })();
+    </script>
+</body>
+
+</html>
