@@ -4,194 +4,36 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Waved Launcher</title>
+    <title>Waved</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%236c8cff'/%3E%3Cpath d='M8 22 24 10l-4 14-4-5-4 3z' fill='white'/%3E%3C/svg%3E">
     <style>
-        html,
-        body {
-            margin: 0;
-            width: 100%;
-            height: 100%;
-            background: #fc2651;
-            color: #fff;
-            font-family: Arial, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            overflow: hidden;
-        }
-
-        #l {
-            position: fixed;
-            inset: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: #fc2651;
-            z-index: 999999;
-        }
-
-        #c {
-            width: min(440px, 86vw);
-            text-align: center;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-        }
-
-        .spinner {
-            position: relative;
-            width: 17.6px;
-            height: 17.6px;
-            margin: 0 auto 44px;
-            animation: spinner-o824ag 1.4s infinite linear;
-        }
-
-        .spinner div {
-            position: absolute;
-            width: 100%;
-            height: 100%;
-            background: #ffffff;
-            border-radius: 2px;
-            animation: spinner-vse6n7 1.75s infinite ease;
-            filter: drop-shadow(0 0 1px rgba(168, 85, 247, .32));
-        }
-
-        .spinner div:nth-child(1) {
-            --rotation: 90;
-        }
-
-        .spinner div:nth-child(2) {
-            --rotation: 180;
-        }
-
-        .spinner div:nth-child(3) {
-            --rotation: 270;
-        }
-
-        .spinner div:nth-child(4) {
-            --rotation: 360;
-        }
-
-        .t {
-            font-size: 15px;
-            font-weight: 500;
-            margin-bottom: 12px;
-            color: #fce7f3;
-            letter-spacing: 0.2px;
-        }
-
-        .b {
-            width: 100%;
-            height: 8px;
-            background: rgba(0, 0, 0, 0.45);
-            border-radius: 999px;
-            overflow: hidden;
-            box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
-        }
-
-        .p {
-            height: 100%;
-            width: 0%;
-            background: #a855f7;
-            border-radius: 999px;
-            box-shadow: 0 0 8px rgba(168, 85, 247, .7);
-            transition: width .12s linear;
-        }
-
-        .n {
-            margin-top: 10px;
-            font-size: 12px;
-            color: #f5d0fe;
-            font-weight: 500;
-        }
-
-        .actions {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-            margin-top: 26px;
-            flex-wrap: wrap;
-        }
-
-        .act-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 8px 16px;
-            background: rgba(0, 0, 0, 0.28);
-            border: 1px solid rgba(255, 255, 255, 0.28);
-            border-radius: 999px;
-            color: #ffffff;
-            font-size: 13px;
-            font-weight: 500;
-            font-family: inherit;
-            cursor: pointer;
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            transition: all 0.2s ease;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-            user-select: none;
-        }
-
-        .act-btn:hover {
-            background: rgba(0, 0, 0, 0.45);
-            border-color: rgba(255, 255, 255, 0.55);
-            transform: translateY(-1px);
-            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
-        }
-
-        .act-btn:active {
-            transform: translateY(0);
-        }
-
-        .act-btn svg {
-            flex-shrink: 0;
-        }
-
-        a.act-btn {
-            text-decoration: none;
-        }
-
-        .err-only {
-            display: none;
-        }
-
-        .err .spinner,
-        .err .b {
-            display: none;
-        }
-
-        .err .err-only {
-            display: inline-flex;
-        }
-
-        @keyframes spinner-vse6n7 {
-
-            0%,
-            100% {
-                transform: rotate(calc(var(--rotation)*1deg)) translateY(0);
-            }
-
-            50% {
-                transform: rotate(calc(var(--rotation)*1deg)) translateY(300%);
-            }
-        }
-
-        @keyframes spinner-o824ag {
-            to {
-                transform: rotate(360deg);
-            }
-        }
+        *{box-sizing:border-box;margin:0;padding:0}
+        html,body{width:100%;height:100%;background:#0a0c10;color:#f8fafc;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overflow:hidden;-webkit-font-smoothing:antialiased}
+        #l{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;z-index:999999;
+            background:radial-gradient(900px 600px at 14% -8%,rgba(108,140,255,.22),transparent 58%),radial-gradient(800px 560px at 92% 8%,rgba(168,85,247,.18),transparent 58%),linear-gradient(160deg,#080a0f,#0e121e 48%,#111022)}
+        #c{width:min(420px,88vw);text-align:center;display:flex;flex-direction:column;align-items:center}
+        .ring{width:50px;height:50px;border-radius:50%;margin-bottom:22px;border:3.5px solid rgba(255,255,255,.1);border-top-color:#6c8cff;border-right-color:#a855f7;animation:spin .8s linear infinite;box-shadow:0 0 24px rgba(108,140,255,.2)}
+        @keyframes spin{to{transform:rotate(360deg)}}
+        .t{font-size:19px;font-weight:700;margin-bottom:14px;background:linear-gradient(135deg,#eef2ff,#a5b4fc 55%,#c084fc);-webkit-background-clip:text;background-clip:text;color:transparent;letter-spacing:-0.2px}
+        .b{width:100%;height:7px;background:rgba(255,255,255,.08);border-radius:999px;overflow:hidden;border:1px solid rgba(255,255,255,.06)}
+        .p{height:100%;width:0%;background:linear-gradient(90deg,#6c8cff,#a855f7);border-radius:999px;box-shadow:0 0 12px rgba(108,140,255,.55);transition:width .12s linear}
+        .n{margin-top:11px;font-size:13px;color:#94a3b8;font-weight:500;line-height:1.45}
+        .actions{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:24px;flex-wrap:wrap}
+        .act-btn{display:inline-flex;align-items:center;gap:6px;padding:9px 16px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);border-radius:999px;color:#f1f5f9;font-size:13px;font-weight:500;font-family:inherit;cursor:pointer;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);transition:all .18s ease;box-shadow:0 4px 14px rgba(0,0,0,.25);user-select:none}
+        .act-btn:hover{background:rgba(255,255,255,.12);border-color:rgba(108,140,255,.45);transform:translateY(-1px)}
+        .act-btn:active{transform:translateY(0)}
+        .act-btn svg{flex-shrink:0}
+        a.act-btn{text-decoration:none}
+        .err-only{display:none}
+        .err .ring,.err .b{display:none}
+        .err .err-only{display:inline-flex}
     </style>
 </head>
 
 <body id="b">
     <div id="l">
         <div id="c">
-            <div class="spinner">
-                <div></div>
-                <div></div>
-                <div></div>
-                <div></div>
-            </div>
+            <div class="ring" aria-hidden="true"></div>
             <div class="t" id="t">Loading Waved...</div>
             <div class="b">
                 <div class="p" id="p"></div>
@@ -224,10 +66,10 @@
         const CACHE_KEY = "waved.launcherCache";
         const IDB_NAME = "waved_launcher_db";
         const IDB_STORE = "cache";
-        const CONNECT_TIMEOUT_MS = 8000;
-        const STALL_TIMEOUT_MS = 15000;
+        const CONNECT_TIMEOUT_MS = 4500;
+        const STALL_TIMEOUT_MS = 12000;
         const MIN_LEN = 50000;
-        const EST_BYTES = 405000;
+        const EST_BYTES = 3085000;
 
         // Only try relative ./singlefile.html on HTTP(S) origins (avoids CORS error on file:// or data:)
         const mirrorList = [
@@ -322,7 +164,7 @@
                 ".r{width:34px;height:34px;border-radius:50%;border:3px solid rgba(255,255,255,.12);border-top-color:#a855f7;animation:s .75s linear infinite}" +
                 "@keyframes s{to{transform:rotate(360deg)}}" +
                 "b{font-size:15px;font-weight:600}p{margin:0;font-size:13px;color:#94a3b8}" +
-                "#app{position:fixed;inset:0;width:100%;height:100%;border:0;background:#0a0c10;opacity:0;transition:opacity .25s ease}" +
+                "#app{position:fixed;inset:0;width:100%;height:100%;border:0;background:#0a0c10;opacity:0;transition:opacity .2s ease;z-index:10}" +
                 "#app.in{opacity:1}</style></head><body>" +
                 "<div class=\"r\"></div><b>Preparing Waved...</b><p>Please keep this tab open while it loads.</p>" +
                 "</body></html>";
@@ -398,7 +240,7 @@
                     let shown = false;
                     const show = () => { if (!shown) { shown = true; f.classList.add("in"); } };
                     f.addEventListener("load", show);
-                    setTimeout(show, 2500);
+                    setTimeout(show, 1500);
                     f.srcdoc = safeHtml;
                     targetWin.document.body.appendChild(f);
                     void f.offsetWidth;
@@ -628,6 +470,10 @@
                 } catch (_) {
                     t.textContent = "Trying backup mirror...";
                     n.textContent = "Source " + (i + 1) + " failed";
+                    if (i === 1 && (await fromCache())) {
+                        busy = false;
+                        return;
+                    }
                     await new Promise(r => setTimeout(r, 80));
                 }
             }

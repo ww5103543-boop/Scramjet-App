@@ -476,6 +476,12 @@ body {
 	z-index: 100;
 }
 
+#browser.is-embed #toolbar,
+#browser.is-embed .progress-bar,
+#browser.is-embed .esc-hold-hud {
+	display: none !important;
+}
+
 .esc-hold-hud {
 	position: fixed;
 	top: 24px;
@@ -1023,83 +1029,42 @@ function loadScriptAsync(src, fallbackUrl) {
 	});
 }
 
-// Standalone proxy page renderer for file:// origins
+// Standalone proxy page renderer for file:// / srcdoc / static origins
+let usingRailwayEmbed = false;
 async function renderStandaloneProxyPage(frameEl, targetUrl) {
-	const bridges = [
-		(u) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(u),
-		(u) => "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(u)
-	];
-
-	let htmlContent = null;
-	for (const getBridge of bridges) {
+	if (!frameEl) return;
+	frameEl.removeAttribute("srcdoc");
+	const embedPrefix = "https://waveds.up.railway.app/";
+	let currentSrc = "";
+	try { currentSrc = frameEl.getAttribute("src") || ""; } catch(e) {}
+	if (usingRailwayEmbed && currentSrc.startsWith(embedPrefix) && frameEl.contentWindow) {
 		try {
-			const res = await fetch(getBridge(targetUrl), { cache: "no-store" });
-			if (res.ok) {
-				htmlContent = await res.text();
-				break;
-			}
+			frameEl.contentWindow.postMessage({ type: "waved-embed-cmd", action: "go", url: targetUrl }, "*");
+			return;
 		} catch(e) {}
 	}
-
-	if (!htmlContent) {
-		frameEl.removeAttribute("srcdoc");
-		frameEl.src = targetUrl;
-		return;
-	}
-
-	const baseTag = `<base href="${targetUrl}">`;
-	const interceptorScript = `
-	<script>
-		document.addEventListener("click", function(e) {
-			const a = e.target.closest("a");
-			if (a && a.href) {
-				e.preventDefault();
-				window.parent.postMessage({ type: "waved-navigate", url: a.href }, "*");
-			}
-		}, true);
-		document.addEventListener("submit", function(e) {
-			const form = e.target;
-			if (form && form.action) {
-				e.preventDefault();
-				const action = form.action;
-				const method = (form.method || "GET").toUpperCase();
-				if (method === "GET") {
-					const fd = new FormData(form);
-					const qs = new URLSearchParams(fd).toString();
-					const sep = action.includes("?") ? "&" : "?";
-					window.parent.postMessage({ type: "waved-navigate", url: action + sep + qs }, "*");
-				}
-			}
-		}, true);
-	<\/script>`;
-
-	let rewritten = htmlContent;
-	if (rewritten.includes("<head>")) {
-		rewritten = rewritten.replace("<head>", `<head>
-${baseTag}
-${interceptorScript}`);
-	} else {
-		rewritten = `${baseTag}
-${interceptorScript}
-${rewritten}`;
-	}
-
-	const blob = new Blob([rewritten], { type: "text/html;charset=utf-8" });
-	frameEl.removeAttribute("srcdoc");
-	frameEl.src = URL.createObjectURL(blob);
+	usingRailwayEmbed = true;
+	frameEl.src = "https://waveds.up.railway.app/?embed=1&goto=" + encodeURIComponent(targetUrl);
 }
 
-// Listen for link navigation messages from proxied iframe
+// Listen for navigation / URL sync messages from proxied or Wavedblox iframe
 window.addEventListener("message", (e) => {
-	if (e.data && e.data.type === "waved-navigate" && e.data.url) {
+	if (!e.data || typeof e.data !== "object") return;
+	if (e.data.type === "waved-navigate" && e.data.url) {
 		if (typeof window.navigate === "function") {
 			window.navigate(e.data.url, false, true);
 		}
+	} else if (e.data.type === "waved-embed-url" && typeof e.data.url === "string") {
+		const addrEl = document.getElementById("address");
+		if (addrEl) addrEl.value = e.data.url;
 	}
 });
 
 // Setup frameElement.src interception so /wavedblox automatically points to embedded blob (UTF-8 safe + ?placeId= query forwarding)
-document.addEventListener("DOMContentLoaded", () => {
+function setupWavedFrameHooks() {
+	if (window.__wavedHooksInstalled) return;
+	window.__wavedHooksInstalled = true;
+
 	const frameEl = document.getElementById("frame");
 	let activeWavedbloxBlobUrl = null;
 	if (frameEl) {
@@ -1111,6 +1076,7 @@ document.addEventListener("DOMContentLoaded", () => {
 			set: function(val) {
 				const strVal = String(val || "");
 				if (strVal.includes("/wavedblox") || strVal.startsWith("waved://roblox") || strVal === "roblox") {
+					usingRailwayEmbed = false;
 					const qIdx = strVal.indexOf("?");
 					const queryStr = qIdx !== -1 ? strVal.slice(qIdx) : "";
 					const binStr = atob(WAVEDBLOX_PAYLOAD_B64);
@@ -1126,6 +1092,9 @@ document.addEventListener("DOMContentLoaded", () => {
 					const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
 					activeWavedbloxBlobUrl = URL.createObjectURL(blob);
 					return origSrcDescriptor.set.call(this, activeWavedbloxBlobUrl);
+				}
+				if (!strVal.startsWith("https://waveds.up.railway.app/?embed=1")) {
+					usingRailwayEmbed = false;
 				}
 				return origSrcDescriptor.set.call(this, val);
 			},
@@ -1159,7 +1128,13 @@ document.addEventListener("DOMContentLoaded", () => {
 			} catch(e) {}
 		});
 	}
-});
+}
+
+if (document.readyState === "loading") {
+	document.addEventListener("DOMContentLoaded", setupWavedFrameHooks);
+} else {
+	setupWavedFrameHooks();
+}
 
 // Scramjet Proxy Bootstrap Initializer
 window.initBootstrap = async function initBootstrap(userConfig = {}) {
@@ -1237,7 +1212,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
 				if (location.protocol.startsWith("http") && location.host && !location.host.includes("localhost:8080")) {
 					wispUrl = (location.protocol === "https:" ? "wss:" : "ws:") + "//" + location.host + config.wispPath;
 				} else {
-					wispUrl = "wss://wisp.waved.site/";
+					wispUrl = "wss://waveds.up.railway.app/wisp/";
 				}
 			}
 
@@ -1302,12 +1277,21 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
 					if (typeof window.finishProgress === "function") window.finishProgress();
 				},
 				back() {
+					if (usingRailwayEmbed && frameEl.contentWindow) {
+						try { frameEl.contentWindow.postMessage({ type: "waved-embed-cmd", action: "back" }, "*"); return; } catch(e) {}
+					}
 					try { frameEl.contentWindow?.history.back(); } catch(e) {}
 				},
 				forward() {
+					if (usingRailwayEmbed && frameEl.contentWindow) {
+						try { frameEl.contentWindow.postMessage({ type: "waved-embed-cmd", action: "forward" }, "*"); return; } catch(e) {}
+					}
 					try { frameEl.contentWindow?.history.forward(); } catch(e) {}
 				},
 				reload() {
+					if (usingRailwayEmbed && frameEl.contentWindow) {
+						try { frameEl.contentWindow.postMessage({ type: "waved-embed-cmd", action: "reload" }, "*"); return; } catch(e) {}
+					}
 					try { frameEl.contentWindow?.location.reload(); } catch(e) { frameEl.src = frameEl.src; }
 				}
 			};
@@ -1654,6 +1638,37 @@ let frame = null;
 let initPromise = null;
 let isFullscreen = false;
 let progressTimer = null;
+const IS_EMBED = new URLSearchParams(location.search).get("embed") === "1";
+
+function createHttpProxyFallbackController() {
+	return {
+		async wait() { return true; },
+		createFrame(frameEl, frameOptions = {}) {
+			return {
+				element: frameEl,
+				plugins: frameOptions.plugins || [],
+				async go(url) {
+					startProgress();
+					frameEl.removeAttribute("srcdoc");
+					frameEl.src = `/api/proxy?url=${encodeURIComponent(url)}`;
+					for (const plugin of (frameOptions.plugins || [])) {
+						try { plugin?.onUrlChange?.(url); } catch {}
+					}
+					finishProgress();
+				},
+				back() {
+					try { frameEl.contentWindow?.history.back(); } catch {}
+				},
+				forward() {
+					try { frameEl.contentWindow?.history.forward(); } catch {}
+				},
+				reload() {
+					try { frameEl.contentWindow?.location.reload(); } catch { frameEl.src = frameEl.src; }
+				},
+			};
+		},
+	};
+}
 
 function startProgress() {
 	if (!progressBar) return;
@@ -1688,35 +1703,55 @@ function init() {
 	if (initPromise) return initPromise;
 
 	initPromise = (async () => {
+		try {
+			controller = await initBootstrap();
+			await controller.wait();
 
-		controller = await initBootstrap();
-		await controller.wait();
+			frame = controller.createFrame(frameElement, {
+				plugins: [
 
-		frame = controller.createFrame(frameElement, {
-			plugins: [
+					new (createHistoryFixPlugin($scramjetUtils.ManagedPlugin))(),
 
-				new (createHistoryFixPlugin($scramjetUtils.ManagedPlugin))(),
+					new $scramjetUtils.HttpCachePlugin(),
 
-				new $scramjetUtils.HttpCachePlugin(),
+					new $scramjetUtils.UrlWatcherPlugin((url) => {
+						addressInput.value = url;
+						finishProgress();
+						document.title = "Waved";
+						if (IS_EMBED && window.parent && window.parent !== window) {
+							try { window.parent.postMessage({ type: "waved-embed-url", url }, "*"); } catch {}
+						}
 
-				new $scramjetUtils.UrlWatcherPlugin((url) => {
-					addressInput.value = url;
-					finishProgress();
-					document.title = "Waved";
+						if (url && !url.startsWith("about:") && !url.startsWith("blob:")) {
+							const targetSearchUrl = "/search/" + encodeURIComponent(url);
+							if (location.pathname + location.search !== targetSearchUrl) {
+								try { history.replaceState({ url }, "", targetSearchUrl); } catch {}
+							}
+						}
+					}),
 
-					if (url && !url.startsWith("about:") && !url.startsWith("blob:")) {
-						const targetSearchUrl = "/search/" + encodeURIComponent(url);
-						if (location.pathname + location.search !== targetSearchUrl) {
-							history.replaceState({ url }, "", targetSearchUrl);
+					new $scramjetUtils.CatchEscapedLinksPlugin((url) => {
+						return new URL(`/search/${encodeURIComponent(url.href)}`, location.origin);
+					}),
+				],
+			});
+		} catch (swErr) {
+			console.warn("Scramjet SW unavailable, using /api/proxy fallback:", swErr);
+			controller = createHttpProxyFallbackController();
+			frame = controller.createFrame(frameElement, {
+				plugins: [
+					{
+						onUrlChange(url) {
+							addressInput.value = url;
+							finishProgress();
+							if (IS_EMBED && window.parent && window.parent !== window) {
+								try { window.parent.postMessage({ type: "waved-embed-url", url }, "*"); } catch {}
+							}
 						}
 					}
-				}),
-
-				new $scramjetUtils.CatchEscapedLinksPlugin((url) => {
-					return new URL(`/search/${encodeURIComponent(url.href)}`, location.origin);
-				}),
-			],
-		});
+				]
+			});
+		}
 	})().catch((err) => {
 		initPromise = null;
 		throw err;
@@ -1749,7 +1784,33 @@ function showHome(updateHistory = true) {
 function showBrowser() {
 	homeEl.hidden = true;
 	browserEl.hidden = false;
+	if (IS_EMBED) {
+		browserEl.classList.add("is-embed");
+	}
 }
+
+window.addEventListener("message", (e) => {
+	const d = e.data;
+	if (!d || typeof d !== "object") return;
+	if (d.type === "waved-embed-url" && typeof d.url === "string") {
+		if (addressInput) addressInput.value = d.url;
+		if (IS_EMBED && window.parent && window.parent !== window) {
+			try { window.parent.postMessage({ type: "waved-embed-url", url: d.url }, "*"); } catch {}
+		}
+		return;
+	}
+	if (d.type === "waved-embed-cmd") {
+		if (d.action === "go" && d.url) {
+			navigate(d.url, false, false);
+		} else if (d.action === "back") {
+			frame?.back?.();
+		} else if (d.action === "forward") {
+			frame?.forward?.();
+		} else if (d.action === "reload") {
+			frame?.reload?.();
+		}
+	}
+});
 
 function setFullscreen(enable) {
 	isFullscreen = enable;
