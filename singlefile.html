@@ -1055,6 +1055,21 @@ async function renderStandaloneProxyPage(frameEl, targetUrl, pushHist = true) {
 		standaloneHistory.push(cleanTarget);
 		standaloneHistIdx = standaloneHistory.length - 1;
 	}
+	try {
+		const u = new URL(cleanTarget);
+		let ytId = "";
+		if (u.hostname === "youtu.be") ytId = u.pathname.slice(1).split("/")[0];
+		else if (u.hostname.includes("youtube.com")) {
+			if (u.pathname.startsWith("/watch")) ytId = u.searchParams.get("v") || "";
+			else if (u.pathname.startsWith("/shorts/")) ytId = u.pathname.split("/shorts/")[1]?.split("/")[0] || "";
+			else if (u.pathname.startsWith("/embed/")) ytId = u.pathname.split("/embed/")[1]?.split("/")[0] || "";
+		}
+		if (ytId) {
+			frameEl.removeAttribute("srcdoc");
+			frameEl.src = "https://www.youtube-nocookie.com/embed/" + encodeURIComponent(ytId) + "?autoplay=1&rel=0";
+			return;
+		}
+	} catch(e) {}
 	frameEl.removeAttribute("srcdoc");
 	frameEl.src = "https://waveds.up.railway.app/api/proxy?url=" + encodeURIComponent(cleanTarget);
 }
