@@ -8,6 +8,14 @@
     var m=new Map(), f={getItem:function(k){return m.has(String(k))?m.get(String(k)):null;},setItem:function(k,v){m.set(String(k),String(v));},removeItem:function(k){m.delete(String(k));},clear:function(){m.clear();},key:function(i){return Array.from(m.keys())[i]||null;},get length(){return m.size;}};
     try{Object.defineProperty(window,n,{get:function(){return f;},configurable:true});}catch(e){}
   });
+  if (location.protocol !== "http:" && location.protocol !== "https:") {
+    try {
+      var hp = (typeof History !== "undefined" && History.prototype) ? History.prototype : history;
+      var ops = hp.pushState, ors = hp.replaceState;
+      if (typeof ops === "function") hp.pushState = function(){ try { return ops.apply(this, arguments); } catch(e) {} };
+      if (typeof ors === "function") hp.replaceState = function(){ try { return ors.apply(this, arguments); } catch(e) {} };
+    } catch(e) {}
+  }
 })();
 </script>
 		<meta charset="UTF-8" />
@@ -474,13 +482,6 @@ body {
 	width: 100vw;
 	height: 100vh;
 	z-index: 100;
-}
-
-#browser.is-embed #toolbar,
-#browser.is-embed .progress-bar,
-#browser.is-embed .esc-hold-hud,
-body.is-embed #home {
-	display: none !important;
 }
 
 .esc-hold-hud {
@@ -1030,26 +1031,14 @@ function loadScriptAsync(src, fallbackUrl) {
 	});
 }
 
-// Standalone proxy page renderer for file:// / srcdoc / static origins
-// Routes directly to live Railway /api/proxy (never loads Waved home page inside the tab!)
-function resolveStandaloneProxyUrl(rawUrl) {
-	try {
-		const u = new URL(rawUrl);
-		if ((u.hostname === "duckduckgo.com" || u.hostname === "www.duckduckgo.com") && (u.pathname === "/" || u.pathname === "")) {
-			u.hostname = "html.duckduckgo.com";
-			u.pathname = "/html/";
-			return u.href;
-		}
-	} catch(e) {}
-	return rawUrl;
-}
-
+// Standalone iframe page loader for non-SW contexts (file:// / about:blank / srcdoc)
 const standaloneHistory = [];
 let standaloneHistIdx = -1;
 
 async function renderStandaloneProxyPage(frameEl, targetUrl, pushHist = true) {
 	if (!frameEl) return;
-	const cleanTarget = resolveStandaloneProxyUrl(targetUrl);
+	const cleanTarget = String(targetUrl || "").trim();
+	if (!cleanTarget) return;
 	if (pushHist) {
 		standaloneHistory.splice(standaloneHistIdx + 1);
 		standaloneHistory.push(cleanTarget);
@@ -1071,7 +1060,7 @@ async function renderStandaloneProxyPage(frameEl, targetUrl, pushHist = true) {
 		}
 	} catch(e) {}
 	frameEl.removeAttribute("srcdoc");
-	frameEl.src = "https://waveds.up.railway.app/api/proxy?url=" + encodeURIComponent(cleanTarget);
+	frameEl.src = cleanTarget;
 }
 
 // Listen for navigation / URL sync messages from proxied or Wavedblox iframe
@@ -1677,50 +1666,6 @@ let frame = null;
 let initPromise = null;
 let isFullscreen = false;
 let progressTimer = null;
-const IS_EMBED = new URLSearchParams(location.search).get("embed") === "1";
-if (IS_EMBED && document.body) {
-	document.body.classList.add("is-embed");
-}
-
-function safePushState(state, title, url) {
-	if (location.protocol !== "http:" && location.protocol !== "https:") return;
-	try { history.pushState(state, title, url); } catch {}
-}
-
-function safeReplaceState(state, title, url) {
-	if (location.protocol !== "http:" && location.protocol !== "https:") return;
-	try { history.replaceState(state, title, url); } catch {}
-}
-
-function createHttpProxyFallbackController() {
-	return {
-		async wait() { return true; },
-		createFrame(frameEl, frameOptions = {}) {
-			return {
-				element: frameEl,
-				plugins: frameOptions.plugins || [],
-				async go(url) {
-					startProgress();
-					frameEl.removeAttribute("srcdoc");
-					frameEl.src = `/api/proxy?url=${encodeURIComponent(url)}`;
-					for (const plugin of (frameOptions.plugins || [])) {
-						try { plugin?.onUrlChange?.(url); } catch {}
-					}
-					finishProgress();
-				},
-				back() {
-					try { frameEl.contentWindow?.history.back(); } catch {}
-				},
-				forward() {
-					try { frameEl.contentWindow?.history.forward(); } catch {}
-				},
-				reload() {
-					try { frameEl.contentWindow?.location.reload(); } catch { frameEl.src = frameEl.src; }
-				},
-			};
-		},
-	};
-}
 
 function startProgress() {
 	if (!progressBar) return;
@@ -1755,62 +1700,35 @@ function init() {
 	if (initPromise) return initPromise;
 
 	initPromise = (async () => {
-		try {
-			const bootstrapPromise = (async () => {
-				const ctrl = await initBootstrap();
-				await ctrl.wait();
-				return ctrl;
-			})();
-			controller = await Promise.race([
-				bootstrapPromise,
-				new Promise((_, rej) => setTimeout(() => rej(new Error("ServiceWorker bootstrap timeout")), 3500)),
-			]);
 
-			frame = controller.createFrame(frameElement, {
-				plugins: [
+		controller = await initBootstrap();
+		await controller.wait();
 
-					new (createHistoryFixPlugin($scramjetUtils.ManagedPlugin))(),
+		frame = controller.createFrame(frameElement, {
+			plugins: [
 
-					new $scramjetUtils.HttpCachePlugin(),
+				new (createHistoryFixPlugin($scramjetUtils.ManagedPlugin))(),
 
-					new $scramjetUtils.UrlWatcherPlugin((url) => {
-						addressInput.value = url;
-						finishProgress();
-						document.title = "Waved";
-						if (IS_EMBED && window.parent && window.parent !== window) {
-							try { window.parent.postMessage({ type: "waved-embed-url", url }, "*"); } catch {}
-						}
+				new $scramjetUtils.HttpCachePlugin(),
 
-						if (url && !url.startsWith("about:") && !url.startsWith("blob:")) {
-							const targetSearchUrl = "/search/" + encodeURIComponent(url);
-							if (location.pathname + location.search !== targetSearchUrl) {
-								safeReplaceState({ url }, "", targetSearchUrl);
-							}
-						}
-					}),
+				new $scramjetUtils.UrlWatcherPlugin((url) => {
+					addressInput.value = url;
+					finishProgress();
+					document.title = "Waved";
 
-					new $scramjetUtils.CatchEscapedLinksPlugin((url) => {
-						return new URL(`/search/${encodeURIComponent(url.href)}`, location.origin);
-					}),
-				],
-			});
-		} catch (swErr) {
-			console.warn("Scramjet SW unavailable, using /api/proxy fallback:", swErr);
-			controller = createHttpProxyFallbackController();
-			frame = controller.createFrame(frameElement, {
-				plugins: [
-					{
-						onUrlChange(url) {
-							addressInput.value = url;
-							finishProgress();
-							if (IS_EMBED && window.parent && window.parent !== window) {
-								try { window.parent.postMessage({ type: "waved-embed-url", url }, "*"); } catch {}
-							}
+					if (url && !url.startsWith("about:") && !url.startsWith("blob:")) {
+						const targetSearchUrl = "/search/" + encodeURIComponent(url);
+						if (location.pathname + location.search !== targetSearchUrl) {
+							history.replaceState({ url }, "", targetSearchUrl);
 						}
 					}
-				]
-			});
-		}
+				}),
+
+				new $scramjetUtils.CatchEscapedLinksPlugin((url) => {
+					return new URL(`/search/${encodeURIComponent(url.href)}`, location.origin);
+				}),
+			],
+		});
 	})().catch((err) => {
 		initPromise = null;
 		throw err;
@@ -1836,40 +1754,14 @@ function showHome(updateHistory = true) {
 	setFullscreen(false);
 	document.title = "Waved";
 	if (updateHistory && location.pathname !== "/") {
-		safePushState(null, "", "/");
+		history.pushState(null, "", "/");
 	}
 }
 
 function showBrowser() {
 	homeEl.hidden = true;
 	browserEl.hidden = false;
-	if (IS_EMBED) {
-		browserEl.classList.add("is-embed");
-	}
 }
-
-window.addEventListener("message", (e) => {
-	const d = e.data;
-	if (!d || typeof d !== "object") return;
-	if (d.type === "waved-embed-url" && typeof d.url === "string") {
-		if (addressInput) addressInput.value = d.url;
-		if (IS_EMBED && window.parent && window.parent !== window) {
-			try { window.parent.postMessage({ type: "waved-embed-url", url: d.url }, "*"); } catch {}
-		}
-		return;
-	}
-	if (d.type === "waved-embed-cmd") {
-		if (d.action === "go" && d.url) {
-			navigate(d.url, false, false);
-		} else if (d.action === "back") {
-			frame?.back?.();
-		} else if (d.action === "forward") {
-			frame?.forward?.();
-		} else if (d.action === "reload") {
-			frame?.reload?.();
-		}
-	}
-});
 
 function setFullscreen(enable) {
 	isFullscreen = enable;
@@ -1925,7 +1817,9 @@ async function navigate(input, autoFullscreen = false, updateHistory = true) {
 			if (updateHistory) {
 				const targetSearchUrl = "/search/" + encodeURIComponent(displayUrl);
 				if (location.pathname + location.search !== targetSearchUrl) {
-					safePushState({ url: displayUrl }, "", targetSearchUrl);
+					try {
+						history.pushState({ url: displayUrl }, "", targetSearchUrl);
+					} catch {}
 				}
 			}
 
@@ -1957,10 +1851,10 @@ async function navigate(input, autoFullscreen = false, updateHistory = true) {
 
 		addressInput.value = resolvedUrl;
 
-		if (updateHistory && !IS_EMBED) {
+		if (updateHistory) {
 			const targetSearchUrl = "/search/" + encodeURIComponent(resolvedUrl);
 			if (location.pathname + location.search !== targetSearchUrl) {
-				safePushState({ url: resolvedUrl }, "", targetSearchUrl);
+				history.pushState({ url: resolvedUrl }, "", targetSearchUrl);
 			}
 		}
 
