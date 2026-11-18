@@ -478,7 +478,8 @@ body {
 
 #browser.is-embed #toolbar,
 #browser.is-embed .progress-bar,
-#browser.is-embed .esc-hold-hud {
+#browser.is-embed .esc-hold-hud,
+body.is-embed #home {
 	display: none !important;
 }
 
@@ -1030,21 +1031,32 @@ function loadScriptAsync(src, fallbackUrl) {
 }
 
 // Standalone proxy page renderer for file:// / srcdoc / static origins
-let usingRailwayEmbed = false;
-async function renderStandaloneProxyPage(frameEl, targetUrl) {
+// Routes directly to live Railway /api/proxy (never loads Waved home page inside the tab!)
+function resolveStandaloneProxyUrl(rawUrl) {
+	try {
+		const u = new URL(rawUrl);
+		if ((u.hostname === "duckduckgo.com" || u.hostname === "www.duckduckgo.com") && (u.pathname === "/" || u.pathname === "")) {
+			u.hostname = "html.duckduckgo.com";
+			u.pathname = "/html/";
+			return u.href;
+		}
+	} catch(e) {}
+	return rawUrl;
+}
+
+const standaloneHistory = [];
+let standaloneHistIdx = -1;
+
+async function renderStandaloneProxyPage(frameEl, targetUrl, pushHist = true) {
 	if (!frameEl) return;
-	frameEl.removeAttribute("srcdoc");
-	const embedPrefix = "https://waveds.up.railway.app/";
-	let currentSrc = "";
-	try { currentSrc = frameEl.getAttribute("src") || ""; } catch(e) {}
-	if (usingRailwayEmbed && currentSrc.startsWith(embedPrefix) && frameEl.contentWindow) {
-		try {
-			frameEl.contentWindow.postMessage({ type: "waved-embed-cmd", action: "go", url: targetUrl }, "*");
-			return;
-		} catch(e) {}
+	const cleanTarget = resolveStandaloneProxyUrl(targetUrl);
+	if (pushHist) {
+		standaloneHistory.splice(standaloneHistIdx + 1);
+		standaloneHistory.push(cleanTarget);
+		standaloneHistIdx = standaloneHistory.length - 1;
 	}
-	usingRailwayEmbed = true;
-	frameEl.src = "https://waveds.up.railway.app/?embed=1&goto=" + encodeURIComponent(targetUrl);
+	frameEl.removeAttribute("srcdoc");
+	frameEl.src = "https://waveds.up.railway.app/api/proxy?url=" + encodeURIComponent(cleanTarget);
 }
 
 // Listen for navigation / URL sync messages from proxied or Wavedblox iframe
@@ -1057,6 +1069,11 @@ window.addEventListener("message", (e) => {
 	} else if (e.data.type === "waved-embed-url" && typeof e.data.url === "string") {
 		const addrEl = document.getElementById("address");
 		if (addrEl) addrEl.value = e.data.url;
+		if (standaloneHistory[standaloneHistIdx] !== e.data.url) {
+			standaloneHistory.splice(standaloneHistIdx + 1);
+			standaloneHistory.push(e.data.url);
+			standaloneHistIdx = standaloneHistory.length - 1;
+		}
 	}
 });
 
@@ -1076,7 +1093,6 @@ function setupWavedFrameHooks() {
 			set: function(val) {
 				const strVal = String(val || "");
 				if (strVal.includes("/wavedblox") || strVal.startsWith("waved://roblox") || strVal === "roblox") {
-					usingRailwayEmbed = false;
 					const qIdx = strVal.indexOf("?");
 					const queryStr = qIdx !== -1 ? strVal.slice(qIdx) : "";
 					const binStr = atob(WAVEDBLOX_PAYLOAD_B64);
@@ -1092,9 +1108,6 @@ function setupWavedFrameHooks() {
 					const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
 					activeWavedbloxBlobUrl = URL.createObjectURL(blob);
 					return origSrcDescriptor.set.call(this, activeWavedbloxBlobUrl);
-				}
-				if (!strVal.startsWith("https://waveds.up.railway.app/?embed=1")) {
-					usingRailwayEmbed = false;
 				}
 				return origSrcDescriptor.set.call(this, val);
 			},
@@ -1277,20 +1290,31 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
 					if (typeof window.finishProgress === "function") window.finishProgress();
 				},
 				back() {
-					if (usingRailwayEmbed && frameEl.contentWindow) {
-						try { frameEl.contentWindow.postMessage({ type: "waved-embed-cmd", action: "back" }, "*"); return; } catch(e) {}
+					if (standaloneHistIdx > 0) {
+						standaloneHistIdx--;
+						const target = standaloneHistory[standaloneHistIdx];
+						const addrEl = document.getElementById("address");
+						if (addrEl) addrEl.value = target;
+						renderStandaloneProxyPage(frameEl, target, false);
+						return;
 					}
-					try { frameEl.contentWindow?.history.back(); } catch(e) {}
+					if (typeof window.finishProgress === "function") window.finishProgress();
 				},
 				forward() {
-					if (usingRailwayEmbed && frameEl.contentWindow) {
-						try { frameEl.contentWindow.postMessage({ type: "waved-embed-cmd", action: "forward" }, "*"); return; } catch(e) {}
+					if (standaloneHistIdx < standaloneHistory.length - 1) {
+						standaloneHistIdx++;
+						const target = standaloneHistory[standaloneHistIdx];
+						const addrEl = document.getElementById("address");
+						if (addrEl) addrEl.value = target;
+						renderStandaloneProxyPage(frameEl, target, false);
+						return;
 					}
-					try { frameEl.contentWindow?.history.forward(); } catch(e) {}
+					if (typeof window.finishProgress === "function") window.finishProgress();
 				},
 				reload() {
-					if (usingRailwayEmbed && frameEl.contentWindow) {
-						try { frameEl.contentWindow.postMessage({ type: "waved-embed-cmd", action: "reload" }, "*"); return; } catch(e) {}
+					if (standaloneHistIdx >= 0 && standaloneHistory[standaloneHistIdx]) {
+						renderStandaloneProxyPage(frameEl, standaloneHistory[standaloneHistIdx], false);
+						return;
 					}
 					try { frameEl.contentWindow?.location.reload(); } catch(e) { frameEl.src = frameEl.src; }
 				}
@@ -1639,6 +1663,19 @@ let initPromise = null;
 let isFullscreen = false;
 let progressTimer = null;
 const IS_EMBED = new URLSearchParams(location.search).get("embed") === "1";
+if (IS_EMBED && document.body) {
+	document.body.classList.add("is-embed");
+}
+
+function safePushState(state, title, url) {
+	if (location.protocol !== "http:" && location.protocol !== "https:") return;
+	try { history.pushState(state, title, url); } catch {}
+}
+
+function safeReplaceState(state, title, url) {
+	if (location.protocol !== "http:" && location.protocol !== "https:") return;
+	try { history.replaceState(state, title, url); } catch {}
+}
 
 function createHttpProxyFallbackController() {
 	return {
@@ -1704,8 +1741,15 @@ function init() {
 
 	initPromise = (async () => {
 		try {
-			controller = await initBootstrap();
-			await controller.wait();
+			const bootstrapPromise = (async () => {
+				const ctrl = await initBootstrap();
+				await ctrl.wait();
+				return ctrl;
+			})();
+			controller = await Promise.race([
+				bootstrapPromise,
+				new Promise((_, rej) => setTimeout(() => rej(new Error("ServiceWorker bootstrap timeout")), 3500)),
+			]);
 
 			frame = controller.createFrame(frameElement, {
 				plugins: [
@@ -1725,7 +1769,7 @@ function init() {
 						if (url && !url.startsWith("about:") && !url.startsWith("blob:")) {
 							const targetSearchUrl = "/search/" + encodeURIComponent(url);
 							if (location.pathname + location.search !== targetSearchUrl) {
-								try { history.replaceState({ url }, "", targetSearchUrl); } catch {}
+								safeReplaceState({ url }, "", targetSearchUrl);
 							}
 						}
 					}),
@@ -1777,7 +1821,7 @@ function showHome(updateHistory = true) {
 	setFullscreen(false);
 	document.title = "Waved";
 	if (updateHistory && location.pathname !== "/") {
-		history.pushState(null, "", "/");
+		safePushState(null, "", "/");
 	}
 }
 
@@ -1866,9 +1910,7 @@ async function navigate(input, autoFullscreen = false, updateHistory = true) {
 			if (updateHistory) {
 				const targetSearchUrl = "/search/" + encodeURIComponent(displayUrl);
 				if (location.pathname + location.search !== targetSearchUrl) {
-					try {
-						history.pushState({ url: displayUrl }, "", targetSearchUrl);
-					} catch {}
+					safePushState({ url: displayUrl }, "", targetSearchUrl);
 				}
 			}
 
@@ -1900,10 +1942,10 @@ async function navigate(input, autoFullscreen = false, updateHistory = true) {
 
 		addressInput.value = resolvedUrl;
 
-		if (updateHistory) {
+		if (updateHistory && !IS_EMBED) {
 			const targetSearchUrl = "/search/" + encodeURIComponent(resolvedUrl);
 			if (location.pathname + location.search !== targetSearchUrl) {
-				history.pushState({ url: resolvedUrl }, "", targetSearchUrl);
+				safePushState({ url: resolvedUrl }, "", targetSearchUrl);
 			}
 		}
 
