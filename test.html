@@ -69,7 +69,7 @@
         const CONNECT_TIMEOUT_MS = 4500;
         const STALL_TIMEOUT_MS = 12000;
         const MIN_LEN = 50000;
-        const EST_BYTES = 3083015;
+        const EST_BYTES = 3201000;
 
         // Only try relative ./singlefile.html on HTTP(S) origins (avoids CORS error on file:// or data:)
         const mirrorList = [
@@ -236,7 +236,6 @@
                     f.id = "app";
                     f.title = "Waved";
                     f.setAttribute("allow", "fullscreen; clipboard-read; clipboard-write; autoplay; microphone; camera; geolocation; encrypted-media; picture-in-picture");
-                    f.setAttribute("allowfullscreen", "");
                     let shown = false;
                     const show = () => { if (!shown) { shown = true; f.classList.add("in"); } };
                     f.addEventListener("load", show);
