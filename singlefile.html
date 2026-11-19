@@ -1787,8 +1787,10 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
           ]);
           break;
         } catch (err) {
-          if (attempt === 1) throw err;
-          debugLog(`Retrying ${method} ${curUrl} (${err?.message || err})`);
+          const msgStr = String(err?.message || err || "");
+          const isCurlUpstreamErr = /error code (?:6|7|28|35|51|52|56|60)\b|timed out|abort/i.test(msgStr);
+          if (attempt === 1 || isCurlUpstreamErr) throw err;
+          debugLog(`Retrying ${method} ${curUrl} (${msgStr})`);
         } finally {
           clearTimeout(timer);
           if (opts.signal) opts.signal.removeEventListener("abort", onOuterAbort);
@@ -1848,6 +1850,12 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       Request: win.Request,
       Response: win.Response,
       Headers: win.Headers,
+      reqUrlGet: Object.getOwnPropertyDescriptor(win.Request.prototype, "url")?.get,
+      reqMethodGet: Object.getOwnPropertyDescriptor(win.Request.prototype, "method")?.get,
+      reqHeadersGet: Object.getOwnPropertyDescriptor(win.Request.prototype, "headers")?.get,
+      reqRedirectGet: Object.getOwnPropertyDescriptor(win.Request.prototype, "redirect")?.get,
+      reqSignalGet: Object.getOwnPropertyDescriptor(win.Request.prototype, "signal")?.get,
+      reqClone: win.Request.prototype.clone,
       XMLHttpRequest: win.XMLHttpRequest,
       WebSocket: win.WebSocket,
       setTimeout: win.setTimeout.bind(win),
@@ -2041,17 +2049,24 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
 
     async function proxiedFetch(input, fetchInit = {}) {
       const isReq = input instanceof native.Request;
-      const rawUrl = isReq ? input.url : resolveVirtualUrl(input);
+      const rawUrl = isReq
+        ? (native.reqUrlGet ? native.reqUrlGet.call(input) : input.url)
+        : resolveVirtualUrl(input);
       if (/^(?:blob:|data:)/i.test(rawUrl)) {
-        return native.fetch(isReq ? input : rawUrl, isReq ? undefined : fetchInit);
+        return native.fetch(isReq ? input : rawUrl, fetchInit && Object.keys(fetchInit).length ? fetchInit : undefined);
       }
       if (!/^https?:/i.test(rawUrl)) {
         throw new TypeError("Unsupported fetch scheme: " + rawUrl);
       }
 
-      const method = (fetchInit.method || (isReq ? input.method : "GET")).toUpperCase();
+      const reqMethod = isReq ? (native.reqMethodGet ? native.reqMethodGet.call(input) : input.method) : "GET";
+      const reqHeaders = isReq ? (native.reqHeadersGet ? native.reqHeadersGet.call(input) : input.headers) : undefined;
+      const reqRedirect = isReq ? (native.reqRedirectGet ? native.reqRedirectGet.call(input) : input.redirect) : "follow";
+      const reqSignal = isReq ? (native.reqSignalGet ? native.reqSignalGet.call(input) : input.signal) : undefined;
+
+      const method = (fetchInit.method || reqMethod || "GET").toUpperCase();
       const hdrs = [];
-      const hObj = new native.Headers(fetchInit.headers || (isReq ? input.headers : undefined));
+      const hObj = new native.Headers(fetchInit.headers || reqHeaders);
       hObj.forEach((v, k) => hdrs.push([k, v]));
 
       let body = null;
@@ -2074,7 +2089,10 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
             } catch {}
           }
         } else if (isReq) {
-          try { body = new Uint8Array(await input.clone().arrayBuffer()); } catch {}
+          try {
+            const cloned = native.reqClone ? native.reqClone.call(input) : input.clone();
+            body = new Uint8Array(await cloned.arrayBuffer());
+          } catch {}
         }
       }
 
@@ -2082,9 +2100,9 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         method,
         headers: hdrs,
         body,
-        redirect: fetchInit.redirect || (isReq ? input.redirect : "follow"),
+        redirect: fetchInit.redirect || reqRedirect || "follow",
         sendOrigin: true,
-        signal: fetchInit.signal || (isReq ? input.signal : undefined)
+        signal: fetchInit.signal || reqSignal
       });
       return buildResponseObject(msg);
     }
