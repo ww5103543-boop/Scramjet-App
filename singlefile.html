@@ -1587,6 +1587,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
   let libcurlModulePromise = null;
   let transportPromise = null;
   let scramjetPromise = null;
+  let scramjetRawCode = "";
 
   async function loadLibcurlModule() {
     if (window.LibcurlTransport) return window.LibcurlTransport;
@@ -1637,6 +1638,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     scramjetPromise = (async () => {
       debugLog("Decompressing Scramjet oxc JS rewriter...");
       const code = await gunzipText(window.__SCRAMJET_GZ_B64, "Scramjet");
+      scramjetRawCode = code;
       (0, eval)(code);
       if (!window.$scramjet) throw new Error("Failed to initialize Scramjet rewriter");
       debugLog("Scramjet rewriter ready.");
@@ -1686,7 +1688,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     "http2-settings", "priority"
   ]);
 
-  function normalizeRequestHeaders(rawHeaders, targetUrlObj, defaultReferer) {
+  function normalizeRequestHeaders(rawHeaders, targetUrlObj, defaultReferer, method = "GET", sendOrigin = false) {
     const map = new Map();
     const put = (k, v) => {
       const low = String(k).trim().toLowerCase();
@@ -1715,8 +1717,15 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     if (!map.has("accept")) {
       put("accept", "*/*");
     }
-    if (typeof defaultReferer === "string" && /^https?:\/\//i.test(defaultReferer) && !map.has("referer")) {
-      put("referer", defaultReferer);
+    if (typeof defaultReferer === "string" && /^https?:\/\//i.test(defaultReferer)) {
+      if (!map.has("referer")) put("referer", defaultReferer);
+      const upperM = String(method || "GET").toUpperCase();
+      if (!map.has("origin") && ((upperM !== "GET" && upperM !== "HEAD") || sendOrigin)) {
+        try {
+          const refOrigin = new URL(defaultReferer).origin;
+          if (refOrigin && refOrigin !== "null") put("origin", refOrigin);
+        } catch {}
+      }
     }
     if (!map.has("cookie")) {
       const ck = cookieJar.getCookieString(targetUrlObj);
@@ -1760,7 +1769,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         throw new TypeError("Unsupported protocol: " + urlObj.protocol);
       }
 
-      const headerTuples = normalizeRequestHeaders(opts.headers, urlObj, opts.referrer);
+      const headerTuples = normalizeRequestHeaders(opts.headers, urlObj, opts.referrer, method, Boolean(opts.sendOrigin));
       let res;
       for (let attempt = 0; attempt < 2; attempt++) {
         const ac = new AbortController();
@@ -1881,6 +1890,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     let reqSeq = 0;
 
     let port = null;
+    let guestScramjetSrc = "";
     const outboundQueue = [];
     const pendingRequests = new Map();
     const pendingSockets = new Map();
@@ -1949,12 +1959,15 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
 
     native.addEventListener.call(win, "message", (ev) => {
       if (ev.source === native.parent && ev.data && ev.data.type === "wisp-port" && ev.data.token === init.token && !port) {
+        if (typeof ev.data.sjCode === "string" && ev.data.sjCode) guestScramjetSrc = ev.data.sjCode;
         port = ev.ports[0];
         port.onmessage = onPortMessage;
         while (outboundQueue.length) {
           const item = outboundQueue.shift();
           port.postMessage(item[0], item[1]);
         }
+      } else if (ev.source === native.parent && ev.data && ev.data.type === "wisp-sj" && ev.data.token === init.token && typeof ev.data.sjCode === "string") {
+        guestScramjetSrc = ev.data.sjCode;
       }
     });
 
@@ -1994,6 +2007,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
           body: fetchInit.body ?? null,
           redirect: fetchInit.redirect || "follow",
           referrer: curUrl,
+          sendOrigin: Boolean(fetchInit.sendOrigin),
           rewriteJs: Boolean(fetchInit.rewriteJs),
           isModule: Boolean(fetchInit.isModule)
         });
@@ -2045,13 +2059,22 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         if (fetchInit.body !== undefined && fetchInit.body !== null) {
           if (typeof fetchInit.body === "string") body = fetchInit.body;
           else if (fetchInit.body instanceof URLSearchParams) body = fetchInit.body.toString();
-          else if (fetchInit.body instanceof ArrayBuffer || ArrayBuffer.isView(fetchInit.body)) {
-            body = new Uint8Array(fetchInit.body instanceof ArrayBuffer ? fetchInit.body : fetchInit.body.buffer);
+          else if (fetchInit.body instanceof ArrayBuffer) {
+            body = new Uint8Array(fetchInit.body).slice();
+          } else if (ArrayBuffer.isView(fetchInit.body)) {
+            body = new Uint8Array(fetchInit.body.buffer, fetchInit.body.byteOffset, fetchInit.body.byteLength).slice();
           } else {
-            try { body = await new native.Response(fetchInit.body).arrayBuffer(); } catch {}
+            try {
+              const tmpRes = new native.Response(fetchInit.body);
+              const autoCt = tmpRes.headers.get("content-type");
+              if (autoCt && !hdrs.some((pair) => String(pair[0]).toLowerCase() === "content-type")) {
+                hdrs.push(["content-type", autoCt]);
+              }
+              body = new Uint8Array(await tmpRes.arrayBuffer());
+            } catch {}
           }
         } else if (isReq) {
-          try { body = await input.clone().arrayBuffer(); } catch {}
+          try { body = new Uint8Array(await input.clone().arrayBuffer()); } catch {}
         }
       }
 
@@ -2060,6 +2083,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         headers: hdrs,
         body,
         redirect: fetchInit.redirect || (isReq ? input.redirect : "follow"),
+        sendOrigin: true,
         signal: fetchInit.signal || (isReq ? input.signal : undefined)
       });
       return buildResponseObject(msg);
@@ -2180,8 +2204,56 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     try { Object.defineProperty(win, "isSecureContext", { configurable: true, get: () => new URL(curUrl).protocol === "https:" }); } catch {}
 
     // Install $scramjet JS rewriter runtime helpers on global window
-    win.$scramjet$wrap = (v) => (v === native.location ? wispLocation : (v === native.top || v === native.parent) ? win : v);
-    win.$scramjet$prop = (p) => (p === "location" || p === "top" || p === "parent") ? "$scramjet__" + p : p;
+    function rewriteDynamicJs(code) {
+      if (typeof code !== "string" || !code) return code;
+      if (!/\b(?:location|top|parent|eval|postMessage)\b/.test(code)) return code;
+      if ((!win.$scramjet || typeof win.$scramjet.rewriteJs !== "function") && guestScramjetSrc) {
+        try {
+          (0, native.eval)(guestScramjetSrc);
+        } catch {}
+      }
+      if (win.$scramjet && typeof win.$scramjet.rewriteJs === "function") {
+        try {
+          const sj = win.$scramjet;
+          const flags = Object.assign({}, sj.defaultConfig.flags, {
+            rewritejs: true,
+            sourcemaps: false,
+            cleanerrors: false,
+            scramitize: false
+          });
+          const ctx = {
+            config: Object.assign({}, sj.defaultConfig, { flags }),
+            prefix: new URL("https://wisp.local/scramjet/"),
+            interface: {
+              codecEncode: (u) => encodeURIComponent(u),
+              codecDecode: (u) => decodeURIComponent(u),
+              getWorkerInjectScripts: () => ""
+            }
+          };
+          const out = sj.rewriteJs(code, curUrl, ctx, { base: new URL(curBase) }, false);
+          return typeof out === "string" ? out : new TextDecoder().decode(out);
+        } catch {}
+      }
+      return code;
+    }
+
+    function extractEvalSource(code) {
+      if (typeof code === "string") return rewriteDynamicJs(code);
+      if (win.TrustedScript && code instanceof win.TrustedScript) return rewriteDynamicJs(String(code));
+      return code;
+    }
+
+    function wispIndirectEval(code) {
+      return (0, native.eval)(extractEvalSource(code));
+    }
+
+    win.$scramjet$wrap = (v) => {
+      if (v === native.location) return wispLocation;
+      if (v === native.top || v === native.parent) return win;
+      if (v === native.eval || v === wispIndirectEval) return wispIndirectEval;
+      return v;
+    };
+    win.$scramjet$prop = (p) => (p === "location" || p === "top" || p === "parent" || p === "eval") ? "$scramjet__" + p : p;
     win.$scramjet$clean = (o) => {
       if (o && typeof o === "object") {
         for (const k of Object.keys(o)) {
@@ -2198,7 +2270,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       }
       return false;
     };
-    win.$scramjet$rewrite = (s) => s;
+    win.$scramjet$rewrite = (s) => extractEvalSource(s);
     win.$scramjet$wrappostmessage = (t) => t;
     win.$scramjet$pushsourcemap = () => {};
     win.$scramjet$import = async (base, spec) => {
@@ -2206,10 +2278,22 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       const bUrl = await fetchBlobUrl(abs, "text/javascript");
       return (0, native.eval)(`import(${JSON.stringify(bUrl)})`);
     };
+    try { Object.defineProperty(win, "eval", { value: wispIndirectEval, configurable: true, writable: true }); } catch {}
+    Object.defineProperty(win, "$scramjet__eval", { configurable: true, writable: true, value: wispIndirectEval });
     Object.defineProperty(win, "$scramjet__location", { configurable: true, get: () => wispLocation, set: (v) => { wispLocation.href = v; } });
     Object.defineProperty(win, "$scramjet__top", { configurable: true, get: () => win });
     Object.defineProperty(win, "$scramjet__parent", { configurable: true, get: () => win });
     try {
+      Object.defineProperty(Object.prototype, "$scramjet__eval", {
+        configurable: true,
+        enumerable: false,
+        get() {
+          return this === win ? wispIndirectEval : this.eval;
+        },
+        set(v) {
+          if (this !== win) this.eval = v;
+        }
+      });
       Object.defineProperty(Object.prototype, "$scramjet__location", {
         configurable: true,
         enumerable: false,
@@ -2519,12 +2603,17 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       if (!matches.length) return workingCss;
       const unique = Array.from(new Set(matches)).slice(0, 250);
       const replacements = new Map();
-      await Promise.all(unique.map(async (ref) => {
-        try {
-          const abs = new URL(ref, cssUrl).href;
-          const resolvedAsset = await fetchBlobUrl(abs, "", true);
-          replacements.set(ref, resolvedAsset);
-        } catch {}
+      const maxConc = 10;
+      let cursor = 0;
+      await Promise.all(Array.from({ length: Math.min(maxConc, unique.length) }, async () => {
+        while (cursor < unique.length) {
+          const ref = unique[cursor++];
+          try {
+            const abs = new URL(ref, cssUrl).href;
+            const resolvedAsset = await fetchBlobUrl(abs, "", true);
+            replacements.set(ref, resolvedAsset);
+          } catch {}
+        }
       }));
       return workingCss.replace(re, (full, q, ref) => {
         const trimmed = ref.trim();
@@ -2532,8 +2621,17 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
           return "url(about:invalid)";
         }
         const repl = replacements.get(trimmed);
-        return repl ? `url("${repl}")` : full;
+        return repl ? `url("${repl}")` : (isSkippableScheme(trimmed) ? full : "url(about:invalid)");
       });
+    }
+
+    function stripPendingCssUrls(cssText) {
+      return String(cssText || "")
+        .replace(/@import\s+(?:url\(\s*)?(['"]?)([^'")\s;]+)\1\s*\)?[^;]*;/gi, "")
+        .replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/gi, (full, q, ref) => {
+          const t = ref.trim();
+          return isSkippableScheme(t) ? full : "url(about:invalid)";
+        });
     }
 
     function splitFontFaces(cssText) {
@@ -2547,6 +2645,9 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
 
     function hydrateCssAsyncWithFonts(rawCss, cssUrl, applyTarget) {
       const { rest, fontCss } = splitFontFaces(rawCss);
+      // Apply stripped CSS immediately so layout/typography render and scripts don't block on icons/fonts
+      const quickRest = stripPendingCssUrls(rest);
+      applyTarget(quickRest);
       if (fontCss && doc.head) {
         hydrateCssUrls(fontCss, cssUrl).then((fixedFonts) => {
           if (!fixedFonts.trim()) return;
@@ -2556,9 +2657,12 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
           doc.head.appendChild(fStyle);
         }).catch(() => {});
       }
-      return hydrateCssUrls(rest, cssUrl).then((fixedRest) => {
-        applyTarget(fixedRest);
-      });
+      if (rest !== quickRest || /@import/i.test(rest)) {
+        hydrateCssUrls(rest, cssUrl).then((fixedRest) => {
+          applyTarget(fixedRest);
+        }).catch(() => {});
+      }
+      return Promise.resolve();
     }
 
     async function hydrateElementAssets(rootEl) {
@@ -2584,36 +2688,39 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       const links = rootEl.matches && rootEl.matches("link[data-wisp-href], link[href]")
         ? [rootEl]
         : Array.from(rootEl.querySelectorAll("link[data-wisp-href], link[href]"));
-      const styleJobs = links.map(async (link) => {
-        if (hydratedEls.has(link)) return;
+      const styleJobs = [];
+      for (const link of links) {
+        if (hydratedEls.has(link)) continue;
         const rel = (native.getAttribute.call(link, "rel") || "").toLowerCase();
         const rawHref = native.getAttribute.call(link, "data-wisp-href") || (native.linkHref ? native.linkHref.get.call(link) : "");
-        if (!rawHref || isSkippableScheme(rawHref)) return;
-        if (!/\b(stylesheet|icon|shortcut)\b/.test(rel)) return;
+        if (!rawHref || isSkippableScheme(rawHref)) continue;
+        if (!/\b(stylesheet|icon|shortcut)\b/.test(rel)) continue;
         hydratedEls.add(link);
         const abs = resolveVirtualUrl(rawHref);
-        try {
-          if (rel.includes("stylesheet")) {
-            const msg = await wispRpcFetch(abs, { method: "GET" });
-            if (msg.status >= 200 && msg.status < 400 && msg.body) {
-              const css = new TextDecoder().decode(new Uint8Array(msg.body));
-              const style = doc.createElement("style");
-              native.setAttribute.call(style, "data-wisp-for", abs);
-              await hydrateCssAsyncWithFonts(css, msg.url || abs, (fixedCss) => {
-                style.textContent = fixedCss;
-              });
-              if (link.parentNode) link.parentNode.insertBefore(style, link.nextSibling);
-              link.dispatchEvent(new Event("load"));
-              return;
-            }
-          } else {
-            const bUrl = await fetchBlobUrl(abs);
+        if (rel.includes("stylesheet")) {
+          styleJobs.push((async () => {
+            try {
+              const msg = await wispRpcFetch(abs, { method: "GET" });
+              if (msg.status >= 200 && msg.status < 400 && msg.body) {
+                const css = new TextDecoder().decode(new Uint8Array(msg.body));
+                const style = doc.createElement("style");
+                native.setAttribute.call(style, "data-wisp-for", abs);
+                await hydrateCssAsyncWithFonts(css, msg.url || abs, (fixedCss) => {
+                  style.textContent = fixedCss;
+                });
+                if (link.parentNode) link.parentNode.insertBefore(style, link.nextSibling);
+                link.dispatchEvent(new Event("load"));
+                return;
+              }
+            } catch {}
+            link.dispatchEvent(new Event("error"));
+          })());
+        } else {
+          fetchBlobUrl(abs).then((bUrl) => {
             if (native.linkHref && native.linkHref.set) native.linkHref.set.call(link, bUrl);
-            return;
-          }
-        } catch {}
-        link.dispatchEvent(new Event("error"));
-      });
+          }).catch(() => {});
+        }
+      }
 
       const media = Array.from(rootEl.querySelectorAll("[data-wisp-src],[data-wisp-poster],img,source,video,audio"));
       if (rootEl.matches && rootEl.matches("img,source,video,audio")) media.unshift(rootEl);
@@ -2902,7 +3009,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       sendToParent({ type: "debug-log", message: `Guest DOM ready. Hydrating CSS & ${(init.scripts || []).length} scripts...` });
       await Promise.race([
         hydrateElementAssets(doc),
-        new Promise((r) => native.setTimeout(r, 4000))
+        new Promise((r) => native.setTimeout(r, 1500))
       ]);
 
       // 2. Execute classic sync scripts in exact document order in global scope
@@ -3040,6 +3147,9 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       sc.textContent = "";
     });
 
+    if (!scramjetRawCode) {
+      await loadScramjetModule().catch(() => {});
+    }
     if (inlineRewriteJobs.length) {
       await Promise.all(inlineRewriteJobs);
     }
@@ -3185,11 +3295,19 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
             body: msg.body,
             redirect: msg.redirect || "follow",
             referrer: msg.referrer,
+            sendOrigin: Boolean(msg.sendOrigin),
             timeoutMs: 12000
           });
           if (!activeSession || activeSession.token !== token) return;
           if (res.status >= 400) {
-            debugError(`HTTP ${res.status} on ${msg.url}`);
+            let errDetail = "";
+            if (isDebugMode() && res.bodyBytes && res.bodyBytes.byteLength) {
+              const ct = getHeaderValue(res.headers, "content-type").toLowerCase();
+              if (!ct || /json|text|xml|html/.test(ct)) {
+                errDetail = " -> " + new TextDecoder().decode(res.bodyBytes.subarray(0, 220)).replace(/\s+/g, " ").trim();
+              }
+            }
+            debugError(`HTTP ${res.status} on ${msg.url}${errDetail}`);
           } else {
             debugLog(`${msg.method || "GET"} ${msg.url} -> ${res.status} (${res.bodyBytes.byteLength} B)`);
           }
@@ -3249,10 +3367,12 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         try {
           const transport = await getWispTransport();
           const wsUrl = new URL(msg.url);
+          const wsReqUrl = new URL(wsUrl.href.replace(/^ws/i, "http"));
+          const wsHeaders = normalizeRequestHeaders([], wsReqUrl, msg.referrer || activeSession.currentUrl || "", "GET", true);
           const pair = transport.connect(
             wsUrl,
             msg.protocols || [],
-            [],
+            wsHeaders,
             () => hostPort.postMessage({ type: "ws-open", id: msg.id }),
             (data) => {
               if (data instanceof ArrayBuffer) {
@@ -3295,7 +3415,11 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     if (ev.data.token !== activeSession.token) return;
     if (ev.source === activeSession.frameEl.contentWindow && !activeSession.portSent) {
       activeSession.portSent = true;
-      ev.source.postMessage({ type: "wisp-port", token: activeSession.token }, "*", [activeSession.guestPort]);
+      ev.source.postMessage({
+        type: "wisp-port",
+        token: activeSession.token,
+        sjCode: scramjetRawCode || ""
+      }, "*", [activeSession.guestPort]);
     }
   });
 
@@ -3332,7 +3456,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     cleanupSession();
     const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
     const { hostPort, guestPort } = installSessionPortHandler(frameEl, token);
-    activeSession = { token, frameEl, port: hostPort, guestPort, portSent: false };
+    activeSession = { token, frameEl, port: hostPort, guestPort, portSent: false, currentUrl: cleanTarget };
 
     if (typeof window.startProgress === "function") window.startProgress();
     debugStatus(`Contacting ${cleanTarget} via ${getWispUrl()}...`);
