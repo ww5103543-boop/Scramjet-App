@@ -1753,7 +1753,6 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     const followRedirects = opts.redirect !== "manual";
     const timeoutMs = Number(opts.timeoutMs) || 20000;
     let redirected = false;
-    let triedDdgHtmlFallback = false;
 
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
       const urlObj = new URL(curUrl);
@@ -1791,15 +1790,6 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       cookieJar.ingestHeaders(resHeaders, urlObj);
 
       const status = Number(res.status) || 0;
-
-      // Fallback cleanly to DuckDuckGo HTML if duckduckgo.com triggers bot/anomaly 202
-      if (!triedDdgHtmlFallback && urlObj.hostname === "duckduckgo.com" && (status === 202 || status === 403) && urlObj.searchParams.has("q")) {
-        triedDdgHtmlFallback = true;
-        await readTransportBodyBytes(res.body).catch(() => {});
-        curUrl = "https://html.duckduckgo.com/html/" + urlObj.search;
-        redirected = true;
-        continue;
-      }
 
       const loc = getHeaderValue(resHeaders, "location");
       if (followRedirects && loc && status >= 300 && status < 400 && hop < MAX_REDIRECTS) {
@@ -2117,7 +2107,9 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     }
 
     // History API virtualizer
+    let curHistState = null;
     function handleHistoryUpdate(state, unusedTitle, url) {
+      curHistState = state !== undefined ? state : null;
       if (url !== undefined && url !== null) {
         curUrl = resolveVirtualUrl(url);
         curBase = curUrl;
@@ -2125,6 +2117,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       }
     }
     try {
+      Object.defineProperty(History.prototype, "state", { configurable: true, get: () => curHistState });
       History.prototype.pushState = function (s, t, u) { handleHistoryUpdate(s, t, u); };
       History.prototype.replaceState = function (s, t, u) { handleHistoryUpdate(s, t, u); };
     } catch {}
@@ -2481,7 +2474,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       let m;
       while ((m = re.exec(workingCss)) !== null) {
         const ref = m[2].trim();
-        if (!ref || isSkippableScheme(ref)) continue;
+        if (!ref || isSkippableScheme(ref) || /\.(?:eot)(?:[?#]|$)|\.svg#/i.test(ref)) continue;
         matches.push(ref);
       }
       if (!matches.length) return workingCss;
@@ -2924,6 +2917,10 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       if (equiv === "content-security-policy" || equiv === "content-security-policy-report-only" || equiv === "x-frame-options") {
         m.remove();
       } else if (equiv === "refresh") {
+        if (m.closest("noscript")) {
+          m.remove();
+          return;
+        }
         const content = m.getAttribute("content") || "";
         const match = /^\s*(\d+)\s*(?:;\s*url\s*=\s*(.+))?$/i.exec(content);
         if (match && match[2]) {
