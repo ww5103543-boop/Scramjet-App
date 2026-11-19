@@ -3233,27 +3233,20 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     }
   });
 
+  let activePageBlobUrl = null;
+
   async function writeHtmlIntoIframe(frameEl, htmlStr) {
     frameEl.removeAttribute("srcdoc");
-    await new Promise((resolve) => {
-      let settled = false;
-      const done = () => {
-        if (settled) return;
-        settled = true;
-        frameEl.removeEventListener("load", done);
-        resolve();
-      };
-      frameEl.addEventListener("load", done, { once: true });
-      frameEl.src = "about:blank";
-      setTimeout(done, 180);
-    });
-    const idoc = frameEl.contentDocument || (frameEl.contentWindow && frameEl.contentWindow.document);
-    if (!idoc) {
-      throw new Error("Unable to access iframe document");
+    const prevBlobUrl = activePageBlobUrl;
+    const blob = new Blob([htmlStr], { type: "text/html;charset=utf-8" });
+    const nextBlobUrl = URL.createObjectURL(blob);
+    activePageBlobUrl = nextBlobUrl;
+    frameEl.src = nextBlobUrl;
+    if (prevBlobUrl) {
+      setTimeout(() => {
+        try { URL.revokeObjectURL(prevBlobUrl); } catch {}
+      }, 5000);
     }
-    idoc.open();
-    idoc.write(htmlStr);
-    idoc.close();
   }
 
   async function renderStandaloneProxyPage(frameEl, targetUrl, pushHist = true, reqOpts = {}) {
