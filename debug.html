@@ -4,7 +4,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Waved Debug</title>
+    <title>Waved</title>
     <link rel="icon"
         href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%236c8cff'/%3E%3Cpath d='M8 22 24 10l-4 14-4-5-4 3z' fill='white'/%3E%3C/svg%3E">
     <style>
@@ -36,8 +36,35 @@
             background: #111215
         }
 
+        .bg-img {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: .78;
+            filter: saturate(1.06) contrast(1.04);
+            pointer-events: none
+        }
+
+        .bg-dim {
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at center, rgba(10, 12, 18, .38) 0%, rgba(8, 10, 16, .76) 100%);
+            pointer-events: none
+        }
+
         #c {
+            position: relative;
+            z-index: 1;
             width: min(380px, 90vw);
+            background: rgba(16, 20, 32, .48);
+            backdrop-filter: blur(28px) saturate(185%);
+            -webkit-backdrop-filter: blur(28px) saturate(185%);
+            border: 1px solid rgba(255, 255, 255, .2);
+            border-radius: 16px;
+            box-shadow: inset 0 1px 1.5px rgba(255, 255, 255, .32), 0 22px 52px rgba(0, 0, 0, .62);
+            padding: 22px 24px;
             display: flex;
             flex-direction: column;
             align-items: flex-start
@@ -54,8 +81,8 @@
             width: 16px;
             height: 16px;
             border-radius: 50%;
-            border: 2px solid #2e3138;
-            border-top-color: #e5e7eb;
+            border: 2px solid rgba(255, 255, 255, .2);
+            border-top-color: #fff;
             animation: spin .7s linear infinite;
             flex-shrink: 0
         }
@@ -69,29 +96,30 @@
         .t {
             font-size: 15px;
             font-weight: 600;
-            color: #f3f4f6;
+            color: #f8fafc;
             letter-spacing: -0.01em
         }
 
         .b {
             width: 100%;
             height: 4px;
-            background: #22242a;
-            border-radius: 2px;
+            background: rgba(255, 255, 255, .14);
+            border-radius: 999px;
             overflow: hidden
         }
 
         .p {
             height: 100%;
             width: 0%;
-            background: #e5e7eb;
+            background: rgba(255, 255, 255, .88);
+            border-radius: 999px;
             transition: width .1s linear
         }
 
         .n {
             margin-top: 9px;
             font-size: 12px;
-            color: #8b909a;
+            color: rgba(226, 232, 240, .72);
             font-variant-numeric: tabular-nums
         }
 
@@ -108,21 +136,23 @@
             align-items: center;
             gap: 6px;
             padding: 7px 12px;
-            background: #1a1c21;
-            border: 1px solid #2b2e36;
-            border-radius: 6px;
-            color: #d1d5db;
+            background: rgba(255, 255, 255, .08);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, .18);
+            border-radius: 10px;
+            color: #f1f5f9;
             font-size: 12px;
             font-weight: 500;
             font-family: inherit;
             cursor: pointer;
-            transition: background .15s, border-color .15s;
+            transition: background .15s, border-color .15s, color .15s;
             user-select: none
         }
 
         .act-btn:hover {
-            background: #23262d;
-            border-color: #3f4451;
+            background: rgba(255, 255, 255, .16);
+            border-color: rgba(255, 255, 255, .34);
             color: #fff
         }
 
@@ -152,10 +182,12 @@
 
 <body id="b">
     <div id="l">
+        <img class="bg-img" src="https://waveds.up.railway.app/background.jpg?v=4" alt="" aria-hidden="true" onerror="this.style.display='none'">
+        <div class="bg-dim" aria-hidden="true"></div>
         <div id="c">
             <div class="head-row">
                 <div class="ring" aria-hidden="true"></div>
-                <div class="t" id="t">Loading Waved (Debug)</div>
+                <div class="t" id="t">Loading Waved</div>
             </div>
             <div class="b">
                 <div class="p" id="p"></div>
@@ -196,11 +228,11 @@
             const CONNECT_TIMEOUT_MS = 4500;
             const STALL_TIMEOUT_MS = 12000;
             const MIN_LEN = 50000;
-            const EST_BYTES = 4942660;
+            const EST_BYTES = 4424382;
 
             // Only try relative ./singlefile.html on HTTP(S) origins (avoids CORS error on file:// or data:)
             const mirrorList = [
-                "aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL3d3NTEwMzU0My1ib29wL1NjcmFtamV0LUFwcC9kYjIyM2E3L3NpbmdsZWZpbGUuaHRtbA==",
+                "aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL3d3NTEwMzU0My1ib29wL1NjcmFtamV0LUFwcC8zNGM1NDRmL3NpbmdsZWZpbGUuaHRtbA==",
                 "aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL3d3NTEwMzU0My1ib29wL1NjcmFtamV0LUFwcC9tYWluL3NpbmdsZWZpbGUuaHRtbA==",
                 "aHR0cHM6Ly9jZG4uanNkZWxpdnIubmV0L2doL3d3NTEwMzU0My1ib29wL1NjcmFtamV0LUFwcEBtYWluL3NpbmdsZWZpbGUuaHRtbA==",
                 "aHR0cHM6Ly9mYXN0bHkuanNkZWxpdnIubmV0L2doL3d3NTEwMzU0My1ib29wL1NjcmFtamV0LUFwcEBtYWluL3NpbmdsZWZpbGUuaHRtbA==",
@@ -555,13 +587,13 @@
                 if (busy || executed) return;
                 busy = true;
                 if (bodyEl) bodyEl.classList.remove("err");
-                t.textContent = "Loading Waved (Debug)...";
+                t.textContent = "Loading Waved...";
                 n.textContent = "Grabbing the latest version...";
                 p.style.width = "0%";
 
                 for (let i = 0; i < u.length; i++) {
                     try {
-                        t.textContent = "Loading Waved (Debug)...";
+                        t.textContent = "Loading Waved...";
                         n.textContent = i === 0 ? "Grabbing the latest version..." : "Trying mirror " + (i + 1) + "...";
                         p.style.width = "0%";
 

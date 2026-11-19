@@ -1,0 +1,654 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Waved</title>
+    <link rel="icon"
+        href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%236c8cff'/%3E%3Cpath d='M8 22 24 10l-4 14-4-5-4 3z' fill='white'/%3E%3C/svg%3E">
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0
+        }
+
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            background: #111215;
+            color: #e5e7eb;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased
+        }
+
+        #l {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            z-index: 999999;
+            background: #111215
+        }
+
+        .bg-img {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: .78;
+            filter: saturate(1.06) contrast(1.04);
+            pointer-events: none
+        }
+
+        .bg-dim {
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at center, rgba(10, 12, 18, .38) 0%, rgba(8, 10, 16, .76) 100%);
+            pointer-events: none
+        }
+
+        #c {
+            position: relative;
+            z-index: 1;
+            width: min(380px, 90vw);
+            background: rgba(16, 20, 32, .48);
+            backdrop-filter: blur(28px) saturate(185%);
+            -webkit-backdrop-filter: blur(28px) saturate(185%);
+            border: 1px solid rgba(255, 255, 255, .2);
+            border-radius: 16px;
+            box-shadow: inset 0 1px 1.5px rgba(255, 255, 255, .32), 0 22px 52px rgba(0, 0, 0, .62);
+            padding: 22px 24px;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start
+        }
+
+        .head-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 16px
+        }
+
+        .ring {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, .2);
+            border-top-color: #fff;
+            animation: spin .7s linear infinite;
+            flex-shrink: 0
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg)
+            }
+        }
+
+        .t {
+            font-size: 15px;
+            font-weight: 600;
+            color: #f8fafc;
+            letter-spacing: -0.01em
+        }
+
+        .b {
+            width: 100%;
+            height: 4px;
+            background: rgba(255, 255, 255, .14);
+            border-radius: 999px;
+            overflow: hidden
+        }
+
+        .p {
+            height: 100%;
+            width: 0%;
+            background: rgba(255, 255, 255, .88);
+            border-radius: 999px;
+            transition: width .1s linear
+        }
+
+        .n {
+            margin-top: 9px;
+            font-size: 12px;
+            color: rgba(226, 232, 240, .72);
+            font-variant-numeric: tabular-nums
+        }
+
+        .actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 18px;
+            flex-wrap: wrap
+        }
+
+        .act-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 7px 12px;
+            background: rgba(255, 255, 255, .08);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, .18);
+            border-radius: 10px;
+            color: #f1f5f9;
+            font-size: 12px;
+            font-weight: 500;
+            font-family: inherit;
+            cursor: pointer;
+            transition: background .15s, border-color .15s, color .15s;
+            user-select: none
+        }
+
+        .act-btn:hover {
+            background: rgba(255, 255, 255, .16);
+            border-color: rgba(255, 255, 255, .34);
+            color: #fff
+        }
+
+        .act-btn svg {
+            flex-shrink: 0;
+            opacity: .85
+        }
+
+        a.act-btn {
+            text-decoration: none
+        }
+
+        .err-only {
+            display: none
+        }
+
+        .err .ring,
+        .err .b {
+            display: none
+        }
+
+        .err .err-only {
+            display: inline-flex
+        }
+    </style>
+</head>
+
+<body id="b">
+    <div id="l">
+        <img class="bg-img" src="https://waveds.up.railway.app/background.jpg?v=4" alt="" aria-hidden="true" onerror="this.style.display='none'">
+        <div class="bg-dim" aria-hidden="true"></div>
+        <div id="c">
+            <div class="head-row">
+                <div class="ring" aria-hidden="true"></div>
+                <div class="t" id="t">Loading Waved</div>
+            </div>
+            <div class="b">
+                <div class="p" id="p"></div>
+            </div>
+            <div class="n" id="n">Fetching bundle...</div>
+
+            <div class="actions">
+                <button type="button" class="act-btn err-only" id="retry">Retry</button>
+                <a class="act-btn err-only" id="raw"
+                    href="https://github.com/ww5103543-boop/Scramjet-App/blob/main/singlefile.html" target="_blank"
+                    rel="noopener">GitHub</a>
+                <button type="button" class="act-btn" id="btn-fs" title="Fullscreen">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path
+                            d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+                    </svg>
+                    <span id="btn-fs-text">Fullscreen</span>
+                </button>
+                <button type="button" class="act-btn" id="btn-cloak" title="Open in about:blank">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                        <polyline points="15 3 21 3 21 9" />
+                        <line x1="10" y1="14" x2="21" y2="3" />
+                    </svg>
+                    <span id="btn-cloak-text">Open about:blank</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        (() => {
+            const CACHE_KEY = "waved.launcherCache";
+            const IDB_NAME = "waved_launcher_db";
+            const IDB_STORE = "cache";
+            const CONNECT_TIMEOUT_MS = 4500;
+            const STALL_TIMEOUT_MS = 12000;
+            const MIN_LEN = 50000;
+            const EST_BYTES = 4424382;
+
+            // Only try relative ./singlefile.html on HTTP(S) origins (avoids CORS error on file:// or data:)
+            const mirrorList = [
+                "aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL3d3NTEwMzU0My1ib29wL1NjcmFtamV0LUFwcC8zNGM1NDRmL3NpbmdsZWZpbGUuaHRtbA==",
+                "aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL3d3NTEwMzU0My1ib29wL1NjcmFtamV0LUFwcC9tYWluL3NpbmdsZWZpbGUuaHRtbA==",
+                "aHR0cHM6Ly9jZG4uanNkZWxpdnIubmV0L2doL3d3NTEwMzU0My1ib29wL1NjcmFtamV0LUFwcEBtYWluL3NpbmdsZWZpbGUuaHRtbA==",
+                "aHR0cHM6Ly9mYXN0bHkuanNkZWxpdnIubmV0L2doL3d3NTEwMzU0My1ib29wL1NjcmFtamV0LUFwcEBtYWluL3NpbmdsZWZpbGUuaHRtbA==",
+                "aHR0cHM6Ly9nY29yZS5qc2RlbGl2ci5uZXQvZ2gvd3c1MTAzNTQzLWJvb3AvU2NyYW1qZXQtQXBwQG1haW4vc2luZ2xlZmlsZS5odG1s",
+                "aHR0cHM6Ly90ZXN0aW5nY2YuanNkZWxpdnIubmV0L2doL3d3NTEwMzU0My1ib29wL1NjcmFtamV0LUFwcEBtYWluL3NpbmdsZWZpbGUuaHRtbA==",
+                "aHR0cHM6Ly9vcmlnaW5mYXN0bHkuanNkZWxpdnIubmV0L2doL3d3NTEwMzU0My1ib29wL1NjcmFtamV0LUFwcEBtYWluL3NpbmdsZWZpbGUuaHRtbA==",
+                "aHR0cHM6Ly9xdWFudGlsLmpzZGVsaXZyLm5ldC9naC93dzUxMDM1NDMtYm9vcC9TY3JhbWpldC1BcHBAbWFpbi9zaW5nbGVmaWxlLmh0bWw=",
+                "aHR0cHM6Ly9qc2RlbGl2ci5iLWNkbi5uZXQvZ2gvd3c1MTAzNTQzLWJvb3AvU2NyYW1qZXQtQXBwQG1haW4vc2luZ2xlZmlsZS5odG1s",
+                "aHR0cHM6Ly9jZG4uc3RhdGljYWxseS5pby9naC93dzUxMDM1NDMtYm9vcC9TY3JhbWpldC1BcHAvbWFpbi9zaW5nbGVmaWxlLmh0bWw=",
+                "aHR0cHM6Ly9yYXcuZ2l0aGFjay5jb20vd3c1MTAzNTQzLWJvb3AvU2NyYW1qZXQtQXBwL21haW4vc2luZ2xlZmlsZS5odG1s",
+                "aHR0cHM6Ly9jZG4uanNkbWlycm9yLmNvbS9naC93dzUxMDM1NDMtYm9vcC9TY3JhbWpldC1BcHBAbWFpbi9zaW5nbGVmaWxlLmh0bWw=",
+                "aHR0cHM6Ly9jZG4uanNkbWlycm9yLmNuL2doL3d3NTEwMzU0My1ib29wL1NjcmFtamV0LUFwcEBtYWluL3NpbmdsZWZpbGUuaHRtbA==",
+                "aHR0cHM6Ly9qc2Qub25taWNyb3NvZnQuY24vZ2gvd3c1MTAzNTQzLWJvb3AvU2NyYW1qZXQtQXBwQG1haW4vc2luZ2xlZmlsZS5odG1s",
+                "aHR0cHM6Ly9qc2QucHJveHkuYWtzLm1vZS9naC93dzUxMDM1NDMtYm9vcC9TY3JhbWpldC1BcHBAbWFpbi9zaW5nbGVmaWxlLmh0bWw=",
+                "aHR0cHM6Ly9naHByb3h5Lm5ldC9odHRwczovL3Jhdy5naXRodWJ1c2VyY29udGVudC5jb20vd3c1MTAzNTQzLWJvb3AvU2NyYW1qZXQtQXBwL21haW4vc2luZ2xlZmlsZS5odG1s"
+            ].map(x => atob(x));
+
+            const u = (location.protocol === "http:" || location.protocol === "https:")
+                ? ["./singlefile.html", ...mirrorList]
+                : mirrorList;
+
+            const bodyEl = document.getElementById("b");
+            const p = document.getElementById("p");
+            const n = document.getElementById("n");
+            const t = document.getElementById("t");
+            const retryBtn = document.getElementById("retry");
+            const btnFs = document.getElementById("btn-fs");
+            const btnFsText = document.getElementById("btn-fs-text");
+            const btnCloak = document.getElementById("btn-cloak");
+            const btnCloakText = document.getElementById("btn-cloak-text");
+
+            const TAB_ICON = "data:image/svg+xml," + encodeURIComponent(
+                "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>" +
+                "<rect width='32' height='32' rx='8' fill='#6c8cff'/>" +
+                "<path d='M8 22 24 10l-4 14-4-5-4 3z' fill='white'/></svg>"
+            );
+
+            let loadedHtml = null;
+            let cloakTargetWin = null;
+            let userRequestedCloak = false;
+            let busy = false;
+            let executed = false;
+
+            const fmt = x => (x / 1048576).toFixed(2) + " MB";
+
+            // Fullscreen toggle handler
+            if (btnFs) {
+                btnFs.addEventListener("click", () => {
+                    if (!document.fullscreenElement) {
+                        const el = document.documentElement;
+                        if (el.requestFullscreen) el.requestFullscreen().catch(() => { });
+                        else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+                        if (btnFsText) btnFsText.textContent = "Exit Fullscreen";
+                    } else {
+                        if (document.exitFullscreen) document.exitFullscreen().catch(() => { });
+                        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+                        if (btnFsText) btnFsText.textContent = "Fullscreen";
+                    }
+                });
+                document.addEventListener("fullscreenchange", () => {
+                    if (btnFsText) {
+                        btnFsText.textContent = document.fullscreenElement ? "Exit Fullscreen" : "Fullscreen";
+                    }
+                });
+            }
+
+            // Stamp tab title and inline SVG icon into a blank tab
+            function stampIdentity(win, title) {
+                try {
+                    const d = win.document;
+                    const hd = d.head || d.getElementsByTagName("head")[0];
+                    if (!hd) return;
+                    hd.querySelectorAll('link[rel~="icon"]').forEach(el => el.remove());
+                    const l = d.createElement("link");
+                    l.rel = "icon";
+                    l.type = "image/svg+xml";
+                    l.href = TAB_ICON;
+                    hd.appendChild(l);
+                    if (title !== false) d.title = title || "Waved";
+                } catch (_) { }
+            }
+
+            // Splash HTML shown inside about:blank immediately on click while loading
+            function splashDoc() {
+                return "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
+                    "<title>Waved</title><link rel=\"icon\" type=\"image/svg+xml\" href=\"" + TAB_ICON + "\">" +
+                    "<style>html,body{margin:0;height:100%;background:#111215;color:#e5e7eb;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,sans-serif}" +
+                    "body{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;text-align:center}" +
+                    ".r{width:18px;height:18px;border-radius:50%;border:2px solid #2e3138;border-top-color:#e5e7eb;animation:s .7s linear infinite}" +
+                    "@keyframes s{to{transform:rotate(360deg)}}" +
+                    "b{font-size:14px;font-weight:600}p{margin:0;font-size:12px;color:#8b909a}" +
+                    "#app{position:fixed;inset:0;width:100%;height:100%;border:0;background:#111215;opacity:0;transition:opacity .2s ease;z-index:10}" +
+                    "#app.in{opacity:1}</style></head><body>" +
+                    "<div class=\"r\"></div><b>Preparing Waved...</b><p>Loading into this tab.</p>" +
+                    "</body></html>";
+            }
+
+            // Open blank tab synchronously from user gesture, with window.top fallback for embedded frames
+            function openBlank() {
+                let w = null;
+                try { w = window.open("about:blank", "_blank"); } catch (_) { }
+                if (!w) { try { w = window.top.open("about:blank", "_blank"); } catch (_) { } }
+                if (w) {
+                    try {
+                        w.document.open();
+                        w.document.write(splashDoc());
+                        w.document.close();
+                        stampIdentity(w, "Waved");
+                    } catch (_) { }
+                }
+                return w;
+            }
+
+            // Inject lightweight runtime fixes so history.pushState and document.URL never throw inside about:blank / srcdoc / file://
+            function injectCompat(html) {
+                const shim = "<script>(function(){try{" +
+                    "var fb=(location.origin&&location.origin!==\"null\"&&/^https?:/i.test(location.origin)?location.origin:\"https://waved.invalid\")+\"/\";" +
+                    "if(!/^https?:/i.test(document.URL)){" +
+                    "try{Object.defineProperty(document,\"URL\",{configurable:true,get:function(){return fb}});}catch(_){}" +
+                    "try{Object.defineProperty(document,\"documentURI\",{configurable:true,get:function(){return fb}});}catch(_){}" +
+                    "}" +
+                    "var ps=history.pushState,rs=history.replaceState;" +
+                    "history.pushState=function(){try{return ps.apply(this,arguments)}catch(_){}};" +
+                    "history.replaceState=function(){try{return rs.apply(this,arguments)}catch(_){}};" +
+                    "}catch(_){}})();<\/script>";
+                let m = html.match(/<head(\s[^>]*)?>/i);
+                if (m) return html.slice(0, m.index + m[0].length) + shim + html.slice(m.index + m[0].length);
+                m = html.match(/<!doctype[^>]*>/i);
+                if (m) return html.slice(0, m.index + m[0].length) + shim + html.slice(m.index + m[0].length);
+                return shim + html;
+            }
+
+            // About:blank opener handler
+            if (btnCloak) {
+                btnCloak.addEventListener("click", () => {
+                    userRequestedCloak = true;
+                    if (loadedHtml) {
+                        const ok = openInAboutBlank(loadedHtml);
+                        if (!ok && btnCloakText) btnCloakText.textContent = "Popup blocked — allow popups";
+                    } else {
+                        if (!cloakTargetWin || cloakTargetWin.closed) {
+                            cloakTargetWin = openBlank();
+                        }
+                        if (!cloakTargetWin) {
+                            if (btnCloakText) btnCloakText.textContent = "Popup blocked — allow popups";
+                        } else if (btnCloakText) {
+                            btnCloakText.textContent = "⏳ Opening when ready...";
+                        }
+                    }
+                });
+            }
+
+            function openInAboutBlank(html) {
+                try {
+                    const targetWin = (cloakTargetWin && !cloakTargetWin.closed) ? cloakTargetWin : openBlank();
+                    if (!targetWin) return false;
+                    const safeHtml = injectCompat(html);
+                    try {
+                        // Render inside fullscreen srcdoc iframe to keep tab icon/title cloaked cleanly
+                        const f = targetWin.document.createElement("iframe");
+                        f.id = "app";
+                        f.title = "Waved";
+                        f.setAttribute("allow", "fullscreen; clipboard-read; clipboard-write; autoplay; microphone; camera; geolocation; encrypted-media; picture-in-picture");
+                        f.setAttribute("allowfullscreen", "");
+                        let shown = false;
+                        const show = () => { if (!shown) { shown = true; f.classList.add("in"); } };
+                        f.addEventListener("load", show);
+                        setTimeout(show, 1500);
+                        f.srcdoc = safeHtml;
+                        targetWin.document.body.appendChild(f);
+                        void f.offsetWidth;
+                    } catch (_) {
+                        targetWin.document.open();
+                        targetWin.document.write(safeHtml);
+                        targetWin.document.close();
+                        stampIdentity(targetWin, "Waved");
+                    }
+                    if (btnCloakText) btnCloakText.textContent = "✓ Opened in about:blank";
+                    return true;
+                } catch (err) {
+                    console.error("Cloak window write error:", err);
+                }
+                return false;
+            }
+
+            // Defer document replacement until HTML parser finishes so offline/cached runs never truncate the stream
+            function run(html) {
+                if (executed) return;
+                executed = true;
+                const safeHtml = injectCompat(html);
+                const go = () => {
+                    try {
+                        document.open();
+                        document.write(safeHtml);
+                        document.close();
+                    } catch (err) {
+                        document.documentElement.innerHTML = safeHtml;
+                        document.querySelectorAll("script").forEach(oldScript => {
+                            const newScript = document.createElement("script");
+                            if (oldScript.src) newScript.src = oldScript.src;
+                            else newScript.textContent = oldScript.textContent;
+                            document.body.appendChild(newScript);
+                        });
+                    }
+                };
+                if (document.readyState === "loading") {
+                    document.addEventListener("DOMContentLoaded", () => setTimeout(go, 0));
+                } else {
+                    setTimeout(go, 0);
+                }
+            }
+
+            // Persistent offline cache: localStorage + IndexedDB fallback for large builds
+            function openIDB() {
+                return new Promise((resolve, reject) => {
+                    if (!window.indexedDB) return reject(new Error("no idb"));
+                    const req = indexedDB.open(IDB_NAME, 1);
+                    req.onupgradeneeded = () => {
+                        if (!req.result.objectStoreNames.contains(IDB_STORE)) {
+                            req.result.createObjectStore(IDB_STORE);
+                        }
+                    };
+                    req.onsuccess = () => resolve(req.result);
+                    req.onerror = () => reject(req.error);
+                });
+            }
+
+            async function saveCache(html) {
+                try { localStorage.setItem(CACHE_KEY, html); } catch (_) { }
+                try {
+                    const db = await openIDB();
+                    await new Promise((res, rej) => {
+                        const tx = db.transaction(IDB_STORE, "readwrite");
+                        tx.objectStore(IDB_STORE).put(html, CACHE_KEY);
+                        tx.oncomplete = () => res();
+                        tx.onerror = () => rej(tx.error);
+                    });
+                    db.close();
+                } catch (_) { }
+            }
+
+            async function readCache() {
+                try {
+                    const c = localStorage.getItem(CACHE_KEY);
+                    if (c && c.toLowerCase().indexOf("<html") !== -1 && c.length >= MIN_LEN) return c;
+                } catch (_) { }
+                try {
+                    const db = await openIDB();
+                    const c = await new Promise((res, rej) => {
+                        const tx = db.transaction(IDB_STORE, "readonly");
+                        const req = tx.objectStore(IDB_STORE).get(CACHE_KEY);
+                        req.onsuccess = () => res(req.result);
+                        req.onerror = () => rej(req.error);
+                    });
+                    db.close();
+                    if (typeof c === "string" && c.toLowerCase().indexOf("<html") !== -1 && c.length >= MIN_LEN) return c;
+                } catch (_) { }
+                return null;
+            }
+
+            async function fromCache() {
+                const cached = await readCache();
+                if (!cached) return false;
+                loadedHtml = cached;
+                p.style.width = "100%";
+                t.textContent = "Loaded from offline cache";
+                n.textContent = "100% · " + fmt(cached.length);
+                if (userRequestedCloak && openInAboutBlank(cached)) {
+                    t.textContent = "Launched in about:blank!";
+                    return true;
+                }
+                run(cached);
+                return true;
+            }
+
+            function fail() {
+                busy = false;
+                if (bodyEl) bodyEl.classList.add("err");
+                t.textContent = "Couldn't load the launcher";
+                n.textContent = "Check your connection and try again. If GitHub/CDNs are blocked on this network, that would explain it.";
+                p.style.width = "0%";
+            }
+
+            function cacheBustedUrl(base) {
+                return base + (base.indexOf("?") === -1 ? "?" : "&") + "v=" + Date.now();
+            }
+
+            async function fetchSource(url) {
+                const ctrl = window.AbortController ? new AbortController() : null;
+                let connectTimer = setTimeout(() => { if (ctrl) ctrl.abort(); }, CONNECT_TIMEOUT_MS);
+                try {
+                    const r = await fetch(cacheBustedUrl(url), {
+                        cache: "no-store",
+                        signal: ctrl ? ctrl.signal : undefined
+                    });
+                    clearTimeout(connectTimer);
+                    connectTimer = null;
+                    if (!r.ok) throw new Error("HTTP " + r.status);
+
+                    if (!r.body || !r.body.getReader) {
+                        const txt = await r.text();
+                        if (txt.length < MIN_LEN || txt.toLowerCase().indexOf("<html") === -1) {
+                            throw new Error("Invalid HTML");
+                        }
+                        p.style.width = "100%";
+                        n.textContent = "100% · " + fmt(txt.length);
+                        return txt;
+                    }
+
+                    const total = +(r.headers.get("content-length") || 0);
+                    const enc = r.headers.get("content-encoding");
+                    let trusted = !!total && !enc;
+                    const rd = r.body.getReader();
+                    const chunks = [];
+                    let got = 0;
+
+                    for (; ;) {
+                        let stallTimer, q;
+                        try {
+                            q = await Promise.race([
+                                rd.read(),
+                                new Promise((_, rej) => {
+                                    stallTimer = setTimeout(() => {
+                                        if (ctrl) ctrl.abort();
+                                        rej(new Error("stall"));
+                                    }, STALL_TIMEOUT_MS);
+                                })
+                            ]);
+                        } finally {
+                            clearTimeout(stallTimer);
+                        }
+                        if (q.done) break;
+                        chunks.push(q.value);
+                        got += q.value.length;
+                        if (trusted && got > total * 1.02) trusted = false;
+                        const den = trusted ? total : Math.max(EST_BYTES, got * 1.05);
+                        const pc = Math.min(99, (got / den) * 100);
+                        p.style.width = pc.toFixed(1) + "%";
+                        n.textContent = trusted
+                            ? pc.toFixed(0) + "% · " + fmt(got) + " / " + fmt(total)
+                            : pc.toFixed(0) + "% · " + fmt(got);
+                    }
+
+                    if (got < MIN_LEN) throw new Error("too small");
+
+                    const all = new Uint8Array(got);
+                    let o = 0;
+                    for (const ch of chunks) {
+                        all.set(ch, o);
+                        o += ch.length;
+                    }
+
+                    const html = new TextDecoder().decode(all);
+                    if (!html.trim() || html.toLowerCase().indexOf("<html") === -1) {
+                        throw new Error("Unexpected response");
+                    }
+
+                    p.style.width = "100%";
+                    n.textContent = "100% · " + fmt(got);
+                    return html;
+                } catch (err) {
+                    if (connectTimer) clearTimeout(connectTimer);
+                    if (ctrl) { try { ctrl.abort(); } catch (_) { } }
+                    throw err;
+                }
+            }
+
+            async function load() {
+                if (busy || executed) return;
+                busy = true;
+                if (bodyEl) bodyEl.classList.remove("err");
+                t.textContent = "Loading Waved...";
+                n.textContent = "Grabbing the latest version...";
+                p.style.width = "0%";
+
+                for (let i = 0; i < u.length; i++) {
+                    try {
+                        t.textContent = "Loading Waved...";
+                        n.textContent = i === 0 ? "Grabbing the latest version..." : "Trying mirror " + (i + 1) + "...";
+                        p.style.width = "0%";
+
+                        const html = await fetchSource(u[i]);
+                        loadedHtml = html;
+                        await saveCache(html);
+
+                        if (userRequestedCloak && openInAboutBlank(html)) {
+                            busy = false;
+                            t.textContent = "Launched in about:blank!";
+                            n.textContent = "You can switch to the new tab.";
+                            return;
+                        }
+
+                        run(html);
+                        return;
+                    } catch (_) {
+                        t.textContent = "Trying backup mirror...";
+                        n.textContent = "Source " + (i + 1) + " failed";
+                        if (i === 1 && (await fromCache())) {
+                            busy = false;
+                            return;
+                        }
+                        await new Promise(r => setTimeout(r, 80));
+                    }
+                }
+
+                if (!(await fromCache())) {
+                    fail();
+                } else {
+                    busy = false;
+                }
+            }
+
+            if (retryBtn) retryBtn.addEventListener("click", load);
+            load();
+        })();
+    </script>
+</body>
+
+</html>
