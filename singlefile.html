@@ -2230,6 +2230,9 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         enumerable: false,
         get() {
           return this === win ? win : this.top;
+        },
+        set(v) {
+          if (this !== win) this.top = v;
         }
       });
       Object.defineProperty(Object.prototype, "$scramjet__parent", {
@@ -2237,6 +2240,9 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         enumerable: false,
         get() {
           return this === win ? win : this.parent;
+        },
+        set(v) {
+          if (this !== win) this.parent = v;
         }
       });
     } catch {}
@@ -2500,12 +2506,14 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         }
       }
 
+      const hasWoff2 = /\.woff2(?:[?#"' )]|$)/i.test(workingCss);
       const matches = [];
       const re = /url\(\s*(['"]?)([^'")]+)\1\s*\)/gi;
       let m;
       while ((m = re.exec(workingCss)) !== null) {
         const ref = m[2].trim();
         if (!ref || isSkippableScheme(ref) || /\.(?:eot)(?:[?#]|$)|\.svg#/i.test(ref)) continue;
+        if (hasWoff2 && /\.(?:woff|ttf|otf)(?:[?#]|$)/i.test(ref)) continue;
         matches.push(ref);
       }
       if (!matches.length) return workingCss;
@@ -2520,8 +2528,36 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       }));
       return workingCss.replace(re, (full, q, ref) => {
         const trimmed = ref.trim();
+        if (hasWoff2 && /\.(?:woff|ttf|otf)(?:[?#]|$)/i.test(trimmed) || /\.(?:eot)(?:[?#]|$)|\.svg#/i.test(trimmed)) {
+          return "url(about:invalid)";
+        }
         const repl = replacements.get(trimmed);
         return repl ? `url("${repl}")` : full;
+      });
+    }
+
+    function splitFontFaces(cssText) {
+      const fontBlocks = [];
+      const rest = String(cssText || "").replace(/@font-face\s*\{[^}]*\}/gi, (blk) => {
+        fontBlocks.push(blk);
+        return "";
+      });
+      return { rest, fontCss: fontBlocks.join("\n") };
+    }
+
+    function hydrateCssAsyncWithFonts(rawCss, cssUrl, applyTarget) {
+      const { rest, fontCss } = splitFontFaces(rawCss);
+      if (fontCss && doc.head) {
+        hydrateCssUrls(fontCss, cssUrl).then((fixedFonts) => {
+          if (!fixedFonts.trim()) return;
+          const fStyle = doc.createElement("style");
+          native.setAttribute.call(fStyle, "data-wisp-for", "fonts");
+          fStyle.textContent = fixedFonts;
+          doc.head.appendChild(fStyle);
+        }).catch(() => {});
+      }
+      return hydrateCssUrls(rest, cssUrl).then((fixedRest) => {
+        applyTarget(fixedRest);
       });
     }
 
@@ -2539,8 +2575,9 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         if (!stashedCss && !rawCss.includes("url(") && !/@import/i.test(rawCss)) return;
         hydratedEls.add(st);
         try {
-          const fixed = await hydrateCssUrls(rawCss, curBase);
-          if (stashedCss || fixed !== rawCss) st.textContent = fixed;
+          await hydrateCssAsyncWithFonts(rawCss, curBase, (fixed) => {
+            if (stashedCss || fixed !== rawCss) st.textContent = fixed;
+          });
         } catch {}
       });
 
@@ -2560,10 +2597,11 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
             const msg = await wispRpcFetch(abs, { method: "GET" });
             if (msg.status >= 200 && msg.status < 400 && msg.body) {
               const css = new TextDecoder().decode(new Uint8Array(msg.body));
-              const fixedCss = await hydrateCssUrls(css, msg.url || abs);
               const style = doc.createElement("style");
               native.setAttribute.call(style, "data-wisp-for", abs);
-              style.textContent = fixedCss;
+              await hydrateCssAsyncWithFonts(css, msg.url || abs, (fixedCss) => {
+                style.textContent = fixedCss;
+              });
               if (link.parentNode) link.parentNode.insertBefore(style, link.nextSibling);
               link.dispatchEvent(new Event("load"));
               return;
