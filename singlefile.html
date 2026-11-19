@@ -1335,6 +1335,134 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     return (typeof window.__WAVED_WISP_URL === "string" && window.__WAVED_WISP_URL) || DEFAULT_WISP_URL;
   }
 
+  // ---------------------------------------------------------------------------
+  // Debug Overlay & Live Request/Error Telemetry (?debug=1 or window.__WAVED_DEBUG)
+  // ---------------------------------------------------------------------------
+  const debugState = {
+    logs: [],
+    errors: [],
+    statusText: "Idle",
+    panel: null,
+    statusEl: null,
+    errSummaryEl: null,
+    logEl: null,
+    minimized: false
+  };
+
+  function isDebugMode() {
+    if (window.__WAVED_DEBUG === true) return true;
+    try { return /(?:^|[?&])debug=(?:1|true)(?:&|$)/i.test(location.search); } catch { return false; }
+  }
+
+  function ensureDebugPanel() {
+    if (!isDebugMode() || debugState.panel || !document.body) return;
+    const wrap = document.createElement("div");
+    wrap.id = "waved-debug-panel";
+    wrap.style.cssText = "position:fixed;right:12px;bottom:12px;width:min(560px,calc(100vw - 24px));max-height:52vh;display:flex;flex-direction:column;background:#111215;color:#e5e7eb;border:1px solid #2b2e36;border-radius:8px;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;z-index:2147483647;box-shadow:0 12px 32px rgba(0,0,0,.6)";
+
+    const bar = document.createElement("div");
+    bar.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 10px;border-bottom:1px solid #23252c;background:#17191e;border-radius:8px 8px 0 0";
+
+    const st = document.createElement("div");
+    st.style.cssText = "font-weight:600;color:#f3f4f6;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1";
+    st.textContent = debugState.statusText;
+
+    const btns = document.createElement("div");
+    btns.style.cssText = "display:flex;gap:6px;flex-shrink:0";
+    const mkBtn = (label, fn) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = label;
+      b.style.cssText = "background:#22252c;border:1px solid #323642;color:#d1d5db;border-radius:4px;padding:2px 8px;font:11px inherit;cursor:pointer";
+      b.onclick = fn;
+      return b;
+    };
+
+    const errBanner = document.createElement("div");
+    errBanner.style.cssText = "padding:6px 10px;border-bottom:1px solid #2b2024;background:#1c1316;color:#fca5a5;max-height:110px;overflow:auto;display:none;white-space:pre-wrap;word-break:break-word";
+
+    const logBox = document.createElement("div");
+    logBox.style.cssText = "padding:8px 10px;overflow:auto;flex:1;white-space:pre-wrap;word-break:break-word;color:#a1a7b3";
+
+    const toggleBtn = mkBtn("Hide", () => {
+      debugState.minimized = !debugState.minimized;
+      logBox.style.display = debugState.minimized ? "none" : "block";
+      errBanner.style.display = (!debugState.minimized && debugState.errors.length) ? "block" : "none";
+      toggleBtn.textContent = debugState.minimized ? "Show" : "Hide";
+    });
+    const copyBtn = mkBtn("Copy", () => {
+      const out = [
+        "STATUS: " + debugState.statusText,
+        "ERRORS (" + debugState.errors.length + "):",
+        ...debugState.errors,
+        "",
+        "TRACE:",
+        ...debugState.logs
+      ].join("\n");
+      navigator.clipboard?.writeText(out).then(() => {
+        copyBtn.textContent = "Copied";
+        setTimeout(() => { copyBtn.textContent = "Copy"; }, 1200);
+      }).catch(() => {});
+    });
+    const clearBtn = mkBtn("Clear", () => {
+      debugState.logs.length = 0;
+      debugState.errors.length = 0;
+      renderDebugPanel();
+    });
+
+    btns.append(copyBtn, clearBtn, toggleBtn);
+    bar.append(st, btns);
+    wrap.append(bar, errBanner, logBox);
+    document.body.appendChild(wrap);
+
+    debugState.panel = wrap;
+    debugState.statusEl = st;
+    debugState.errSummaryEl = errBanner;
+    debugState.logEl = logBox;
+    renderDebugPanel();
+  }
+
+  function renderDebugPanel() {
+    ensureDebugPanel();
+    if (!debugState.panel) return;
+    debugState.statusEl.textContent = debugState.statusText + (debugState.errors.length ? ` | Errors (${debugState.errors.length})` : "");
+    if (debugState.errors.length && !debugState.minimized) {
+      debugState.errSummaryEl.style.display = "block";
+      debugState.errSummaryEl.textContent = "Errors:\n" + debugState.errors.slice(-25).join("\n");
+    } else {
+      debugState.errSummaryEl.style.display = "none";
+    }
+    debugState.logEl.textContent = debugState.logs.slice(-120).join("\n");
+    debugState.logEl.scrollTop = debugState.logEl.scrollHeight;
+  }
+
+  function stampTime() {
+    const d = new Date();
+    return d.toTimeString().slice(0, 8) + "." + String(d.getMilliseconds()).padStart(3, "0");
+  }
+
+  function debugStatus(text) {
+    debugState.statusText = text;
+    debugLog(text);
+  }
+
+  function debugLog(msg) {
+    if (!isDebugMode()) return;
+    debugState.logs.push(`[${stampTime()}] ${msg}`);
+    if (debugState.logs.length > 400) debugState.logs.splice(0, debugState.logs.length - 400);
+    renderDebugPanel();
+  }
+
+  function debugError(msg) {
+    const line = `[${stampTime()}] ERROR: ${msg}`;
+    if (isDebugMode()) {
+      debugState.errors.push(line);
+      if (debugState.errors.length > 100) debugState.errors.splice(0, debugState.errors.length - 100);
+      debugState.logs.push(line);
+      renderDebugPanel();
+    }
+  }
+
   async function gunzipText(b64, label) {
     if (!b64) throw new Error("Embedded " + label + " payload missing");
     const bin = atob(b64);
@@ -1465,13 +1593,16 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     if (libcurlModulePromise) return libcurlModulePromise;
 
     libcurlModulePromise = (async () => {
+      debugLog("Decompressing LibcurlTransport...");
       const code = await gunzipText(window.__LIBCURL_GZ_B64, "LibcurlTransport");
       (0, eval)(code);
       if (!window.LibcurlTransport) throw new Error("Failed to evaluate LibcurlTransport");
+      debugLog("LibcurlTransport evaluated.");
       return window.LibcurlTransport;
     })();
 
-    libcurlModulePromise.catch(() => {
+    libcurlModulePromise.catch((e) => {
+      debugError("loadLibcurlModule: " + (e?.message || e));
       libcurlModulePromise = null;
     });
     return libcurlModulePromise;
@@ -1484,12 +1615,16 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     transportPromise = (async () => {
       const mod = await loadLibcurlModule();
       const LibcurlCtor = mod.LibcurlClient || mod.default || mod;
-      const client = new LibcurlCtor({ wisp: getWispUrl() });
+      const wispUrl = getWispUrl();
+      debugLog("Initializing LibcurlClient WASM + Wisp (" + wispUrl + ")...");
+      const client = new LibcurlCtor({ wisp: wispUrl });
       await client.init();
+      debugLog("LibcurlClient ready.");
       return client;
     })();
 
-    transportPromise.catch(() => {
+    transportPromise.catch((e) => {
+      debugError("getWispTransport: " + (e?.message || e));
       transportPromise = null;
     });
     return transportPromise;
@@ -1500,13 +1635,16 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     if (scramjetPromise) return scramjetPromise;
 
     scramjetPromise = (async () => {
+      debugLog("Decompressing Scramjet oxc JS rewriter...");
       const code = await gunzipText(window.__SCRAMJET_GZ_B64, "Scramjet");
       (0, eval)(code);
       if (!window.$scramjet) throw new Error("Failed to initialize Scramjet rewriter");
+      debugLog("Scramjet rewriter ready.");
       return window.$scramjet;
     })();
 
-    scramjetPromise.catch(() => {
+    scramjetPromise.catch((e) => {
+      debugError("loadScramjetModule: " + (e?.message || e));
       scramjetPromise = null;
     });
     return scramjetPromise;
@@ -1613,6 +1751,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     let body = opts.body !== undefined ? opts.body : null;
     if (method === "GET" || method === "HEAD") body = null;
     const followRedirects = opts.redirect !== "manual";
+    const timeoutMs = Number(opts.timeoutMs) || 20000;
     let redirected = false;
     let triedDdgHtmlFallback = false;
 
@@ -1625,12 +1764,26 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       const headerTuples = normalizeRequestHeaders(opts.headers, urlObj, opts.referrer);
       let res;
       for (let attempt = 0; attempt < 2; attempt++) {
+        const ac = new AbortController();
+        const onOuterAbort = () => ac.abort();
+        if (opts.signal) {
+          if (opts.signal.aborted) ac.abort();
+          else opts.signal.addEventListener("abort", onOuterAbort, { once: true });
+        }
+        const timer = setTimeout(() => ac.abort(new Error("Request timeout after " + timeoutMs + "ms")), timeoutMs);
         try {
           const transport = await getWispTransport(attempt > 0);
-          res = await transport.request(urlObj, method, body, headerTuples, opts.signal);
+          res = await Promise.race([
+            transport.request(urlObj, method, body, headerTuples, ac.signal),
+            new Promise((_, rej) => ac.signal.addEventListener("abort", () => rej(new Error("Request timed out: " + curUrl)), { once: true }))
+          ]);
           break;
         } catch (err) {
           if (attempt === 1) throw err;
+          debugLog(`Retrying ${method} ${curUrl} (${err?.message || err})`);
+        } finally {
+          clearTimeout(timer);
+          if (opts.signal) opts.signal.removeEventListener("abort", onOuterAbort);
         }
       }
 
@@ -2438,6 +2591,18 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       await Promise.allSettled([...inlineStyleJobs, ...styleJobs]);
     }
 
+    native.addEventListener.call(win, "error", (ev) => {
+      const msg = ev.message || (ev.error && ev.error.message) || "Script error";
+      const src = ev.filename ? `${ev.filename}:${ev.lineno}` : "";
+      sendToParent({ type: "debug-error", message: `${msg}${src ? " (" + src + ")" : ""}` });
+    });
+
+    native.addEventListener.call(win, "unhandledrejection", (ev) => {
+      const r = ev.reason;
+      const msg = r && r.message ? r.message : String(r || "Unhandled rejection");
+      sendToParent({ type: "debug-error", message: "Unhandled rejection: " + msg });
+    });
+
     function executeJsCode(code, labelUrl, scriptEl, isModule = false) {
       if (!code) return;
       const prevEl = activeScriptEl;
@@ -2447,11 +2612,13 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         if (isModule) {
           const bUrl = URL.createObjectURL(new Blob([finalCode], { type: "text/javascript" }));
           return (0, native.eval)(`import(${JSON.stringify(bUrl)})`).catch((err) => {
+            sendToParent({ type: "debug-error", message: `Module ${labelUrl}: ${err?.message || err}` });
             console.warn("[wisp-guest] module error:", labelUrl, err);
           });
         }
         (0, native.eval)(finalCode);
       } catch (err) {
+        sendToParent({ type: "debug-error", message: `Script ${labelUrl || "inline"}: ${err?.message || err}` });
         console.warn("[wisp-guest] script error:", labelUrl || "inline", err);
       } finally {
         activeScriptEl = prevEl;
@@ -2470,7 +2637,10 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
           scriptEl.dispatchEvent(new Event("load"));
           return;
         }
-      } catch {}
+        sendToParent({ type: "debug-error", message: `Dynamic script HTTP ${msg.status}: ${abs}` });
+      } catch (err) {
+        sendToParent({ type: "debug-error", message: `Dynamic script failed: ${abs} (${err?.message || err})` });
+      }
       scriptEl.dispatchEvent(new Event("error"));
     }
 
@@ -2667,7 +2837,11 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         }
       }
 
-      await hydrateElementAssets(doc);
+      sendToParent({ type: "debug-log", message: `Guest DOM ready. Hydrating CSS & ${(init.scripts || []).length} scripts...` });
+      await Promise.race([
+        hydrateElementAssets(doc),
+        new Promise((r) => native.setTimeout(r, 4000))
+      ]);
 
       // 2. Execute classic sync scripts in exact document order in global scope
       const deferList = [];
@@ -2899,17 +3073,18 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     const safeUrl = String(targetUrl).replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
     const safeErr = String(errMsg || "Connection failed").replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
     return `<!doctype html><html><head><meta charset="utf-8"><style>
-      body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b1020;color:#e2e8f0;font-family:system-ui,-apple-system,sans-serif;padding:24px}
-      .card{max-width:520px;width:100%;background:rgba(15,23,42,.92);border:1px solid rgba(129,140,248,.25);border-radius:18px;padding:28px;box-shadow:0 20px 60px rgba(0,0,0,.45)}
-      h2{margin:0 0 8px;font-size:1.15rem;color:#fff}
-      p{margin:0 0 12px;color:#94a3b8;font-size:.92rem;line-height:1.5;word-break:break-word}
-      code{display:block;background:#020617;padding:10px 12px;border-radius:10px;color:#fca5a5;font-size:.82rem;margin-bottom:16px;white-space:pre-wrap}
-      button{border:none;border-radius:10px;padding:10px 18px;background:#6366f1;color:#fff;font-weight:600;cursor:pointer}
+      body{margin:0;min-height:100vh;display:grid;place-items:center;background:#111215;color:#e5e7eb;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:24px}
+      .card{max-width:520px;width:100%;background:#17191e;border:1px solid #2b2e36;border-radius:8px;padding:24px}
+      h2{margin:0 0 8px;font-size:16px;color:#f3f4f6}
+      p{margin:0 0 12px;color:#9ca3af;font-size:13px;line-height:1.5;word-break:break-word}
+      code{display:block;background:#0d0e11;border:1px solid #23252c;padding:10px 12px;border-radius:6px;color:#fca5a5;font-size:12px;margin-bottom:16px;white-space:pre-wrap}
+      button{border:1px solid #323642;border-radius:6px;padding:8px 14px;background:#22252c;color:#f3f4f6;font-size:13px;font-weight:500;cursor:pointer}
+      button:hover{background:#2c303a}
     </style></head><body><div class="card">
-      <h2>Could not reach site via Wisp</h2>
+      <h2>Request failed via Wisp</h2>
       <p>URL: ${safeUrl}</p>
       <code>${safeErr}</code>
-      <button onclick="parent.postMessage({type:'waved-navigate',url:${JSON.stringify(targetUrl)}},'*')">Retry via Wisp</button>
+      <button onclick="parent.postMessage({type:'waved-navigate',url:${JSON.stringify(targetUrl)}},'*')">Retry</button>
     </div></body></html>`;
   }
 
@@ -2923,6 +3098,19 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       const msg = ev.data;
       if (!msg || typeof msg !== "object") return;
 
+      if (msg.type === "debug-log") {
+        debugLog(msg.message);
+        return;
+      }
+      if (msg.type === "debug-error") {
+        debugError(msg.message);
+        return;
+      }
+      if (msg.type === "ready") {
+        debugStatus(`Loaded ${msg.url || ""} (${msg.title || "untitled"})`);
+        return;
+      }
+
       if (msg.type === "request") {
         try {
           const res = await wispRequest(msg.url, {
@@ -2930,9 +3118,15 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
             headers: msg.headers || [],
             body: msg.body,
             redirect: msg.redirect || "follow",
-            referrer: msg.referrer
+            referrer: msg.referrer,
+            timeoutMs: 12000
           });
           if (!activeSession || activeSession.token !== token) return;
+          if (res.status >= 400) {
+            debugError(`HTTP ${res.status} on ${msg.url}`);
+          } else {
+            debugLog(`${msg.method || "GET"} ${msg.url} -> ${res.status} (${res.bodyBytes.byteLength} B)`);
+          }
           let finalBytes = res.bodyBytes;
           if (msg.rewriteJs && res.status >= 200 && res.status < 400 && finalBytes && finalBytes.byteLength) {
             const rawCode = new TextDecoder().decode(finalBytes);
@@ -2952,6 +3146,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
             body: ab
           }, [ab]);
         } catch (err) {
+          debugError(`${msg.method || "GET"} ${msg.url}: ${err && err.message ? err.message : String(err)}`);
           hostPort.postMessage({
             type: "request-error",
             id: msg.id,
@@ -3081,6 +3276,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     activeSession = { token, frameEl, port: hostPort, guestPort, portSent: false };
 
     if (typeof window.startProgress === "function") window.startProgress();
+    debugStatus(`Contacting ${cleanTarget} via ${getWispUrl()}...`);
 
     try {
       const fetchHeaders = [
@@ -3093,10 +3289,12 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         method: reqOpts.method || "GET",
         headers: fetchHeaders,
         body: reqOpts.body || null,
-        referrer: /^https?:\/\//i.test(prevRef) ? prevRef : ""
+        referrer: /^https?:\/\//i.test(prevRef) ? prevRef : "",
+        timeoutMs: 22000
       });
 
       if (!activeSession || activeSession.token !== token) return;
+      debugStatus(`${res.status} ${res.statusText || "OK"} - ${res.finalUrl} (${res.bodyBytes.byteLength} B)`);
 
       if (res.finalUrl && res.finalUrl !== cleanTarget) {
         standaloneHistory[standaloneHistIdx] = res.finalUrl;
@@ -3106,18 +3304,24 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       const contentType = getHeaderValue(res.headers, "content-type").toLowerCase();
       if (!contentType || contentType.includes("text/html") || contentType.includes("application/xhtml")) {
         const html = new TextDecoder().decode(res.bodyBytes);
+        debugLog("Preparing document + rewriting inline scripts...");
         const prepared = await prepareHtmlForDocument(html, res.finalUrl, token, /^https?:\/\//i.test(prevRef) ? prevRef : "");
         if (!activeSession || activeSession.token !== token) return;
+        debugLog(`Writing ${prepared.length} chars into iframe...`);
         await writeHtmlIntoIframe(frameEl, prepared);
       } else {
         const blob = new Blob([res.bodyBytes], { type: contentType.split(";")[0] || "application/octet-stream" });
         const blobUrl = URL.createObjectURL(blob);
         frameEl.removeAttribute("srcdoc");
         frameEl.src = blobUrl;
+        debugStatus(`Rendered binary asset (${contentType})`);
       }
     } catch (err) {
       if (!activeSession || activeSession.token !== token) return;
-      await writeHtmlIntoIframe(frameEl, renderErrorHtml(cleanTarget, err && err.message ? err.message : String(err))).catch(() => {});
+      const errMsg = err && err.message ? err.message : String(err);
+      debugError(`Failed loading ${cleanTarget}: ${errMsg}`);
+      debugStatus(`Error contacting ${cleanTarget}`);
+      await writeHtmlIntoIframe(frameEl, renderErrorHtml(cleanTarget, errMsg)).catch(() => {});
     } finally {
       if (typeof window.finishProgress === "function") window.finishProgress();
     }

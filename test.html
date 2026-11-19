@@ -8,21 +8,20 @@
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%236c8cff'/%3E%3Cpath d='M8 22 24 10l-4 14-4-5-4 3z' fill='white'/%3E%3C/svg%3E">
     <style>
         *{box-sizing:border-box;margin:0;padding:0}
-        html,body{width:100%;height:100%;background:#0a0c10;color:#f8fafc;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overflow:hidden;-webkit-font-smoothing:antialiased}
-        #l{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;z-index:999999;
-            background:radial-gradient(900px 600px at 14% -8%,rgba(108,140,255,.22),transparent 58%),radial-gradient(800px 560px at 92% 8%,rgba(168,85,247,.18),transparent 58%),linear-gradient(160deg,#080a0f,#0e121e 48%,#111022)}
-        #c{width:min(420px,88vw);text-align:center;display:flex;flex-direction:column;align-items:center}
-        .ring{width:50px;height:50px;border-radius:50%;margin-bottom:22px;border:3.5px solid rgba(255,255,255,.1);border-top-color:#6c8cff;border-right-color:#a855f7;animation:spin .8s linear infinite;box-shadow:0 0 24px rgba(108,140,255,.2)}
+        html,body{width:100%;height:100%;background:#111215;color:#e5e7eb;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;overflow:hidden;-webkit-font-smoothing:antialiased}
+        #l{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;z-index:999999;background:#111215}
+        #c{width:min(380px,90vw);display:flex;flex-direction:column;align-items:flex-start}
+        .head-row{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+        .ring{width:16px;height:16px;border-radius:50%;border:2px solid #2e3138;border-top-color:#e5e7eb;animation:spin .7s linear infinite;flex-shrink:0}
         @keyframes spin{to{transform:rotate(360deg)}}
-        .t{font-size:19px;font-weight:700;margin-bottom:14px;background:linear-gradient(135deg,#eef2ff,#a5b4fc 55%,#c084fc);-webkit-background-clip:text;background-clip:text;color:transparent;letter-spacing:-0.2px}
-        .b{width:100%;height:7px;background:rgba(255,255,255,.08);border-radius:999px;overflow:hidden;border:1px solid rgba(255,255,255,.06)}
-        .p{height:100%;width:0%;background:linear-gradient(90deg,#6c8cff,#a855f7);border-radius:999px;box-shadow:0 0 12px rgba(108,140,255,.55);transition:width .12s linear}
-        .n{margin-top:11px;font-size:13px;color:#94a3b8;font-weight:500;line-height:1.45}
-        .actions{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:24px;flex-wrap:wrap}
-        .act-btn{display:inline-flex;align-items:center;gap:6px;padding:9px 16px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);border-radius:999px;color:#f1f5f9;font-size:13px;font-weight:500;font-family:inherit;cursor:pointer;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);transition:all .18s ease;box-shadow:0 4px 14px rgba(0,0,0,.25);user-select:none}
-        .act-btn:hover{background:rgba(255,255,255,.12);border-color:rgba(108,140,255,.45);transform:translateY(-1px)}
-        .act-btn:active{transform:translateY(0)}
-        .act-btn svg{flex-shrink:0}
+        .t{font-size:15px;font-weight:600;color:#f3f4f6;letter-spacing:-0.01em}
+        .b{width:100%;height:4px;background:#22242a;border-radius:2px;overflow:hidden}
+        .p{height:100%;width:0%;background:#e5e7eb;transition:width .1s linear}
+        .n{margin-top:9px;font-size:12px;color:#8b909a;font-variant-numeric:tabular-nums}
+        .actions{display:flex;align-items:center;gap:8px;margin-top:18px;flex-wrap:wrap}
+        .act-btn{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;background:#1a1c21;border:1px solid #2b2e36;border-radius:6px;color:#d1d5db;font-size:12px;font-weight:500;font-family:inherit;cursor:pointer;transition:background .15s,border-color .15s;user-select:none}
+        .act-btn:hover{background:#23262d;border-color:#3f4451;color:#fff}
+        .act-btn svg{flex-shrink:0;opacity:.85}
         a.act-btn{text-decoration:none}
         .err-only{display:none}
         .err .ring,.err .b{display:none}
@@ -33,29 +32,31 @@
 <body id="b">
     <div id="l">
         <div id="c">
-            <div class="ring" aria-hidden="true"></div>
-            <div class="t" id="t">Loading Waved...</div>
+            <div class="head-row">
+                <div class="ring" aria-hidden="true"></div>
+                <div class="t" id="t">Loading Waved</div>
+            </div>
             <div class="b">
                 <div class="p" id="p"></div>
             </div>
-            <div class="n" id="n">Grabbing the latest version...</div>
+            <div class="n" id="n">Fetching bundle...</div>
 
             <div class="actions">
-                <button type="button" class="act-btn err-only" id="retry">Try again</button>
-                <a class="act-btn err-only" id="raw" href="https://github.com/ww5103543-boop/Scramjet-App/blob/main/singlefile.html" target="_blank" rel="noopener">Open on GitHub</a>
-                <button type="button" class="act-btn" id="btn-fs" title="Toggle Fullscreen">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <button type="button" class="act-btn err-only" id="retry">Retry</button>
+                <a class="act-btn err-only" id="raw" href="https://github.com/ww5103543-boop/Scramjet-App/blob/main/singlefile.html" target="_blank" rel="noopener">GitHub</a>
+                <button type="button" class="act-btn" id="btn-fs" title="Fullscreen">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
                     </svg>
                     <span id="btn-fs-text">Fullscreen</span>
                 </button>
                 <button type="button" class="act-btn" id="btn-cloak" title="Open in about:blank">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
                         <polyline points="15 3 21 3 21 9"/>
                         <line x1="10" y1="14" x2="21" y2="3"/>
                     </svg>
-                    <span id="btn-cloak-text">Open in about:blank</span>
+                    <span id="btn-cloak-text">Open about:blank</span>
                 </button>
             </div>
         </div>
@@ -69,7 +70,7 @@
         const CONNECT_TIMEOUT_MS = 4500;
         const STALL_TIMEOUT_MS = 12000;
         const MIN_LEN = 50000;
-        const EST_BYTES = 4924918;
+        const EST_BYTES = 4934032;
 
         // Only try relative ./singlefile.html on HTTP(S) origins (avoids CORS error on file:// or data:)
         const mirrorList = [
@@ -159,14 +160,13 @@
         function splashDoc() {
             return "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
                 "<title>Waved</title><link rel=\"icon\" type=\"image/svg+xml\" href=\"" + TAB_ICON + "\">" +
-                "<style>html,body{margin:0;height:100%;background:#0a0c10;color:#eef0ff;font-family:Inter,system-ui,-apple-system,sans-serif}" +
-                "body{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;text-align:center}" +
-                ".r{width:34px;height:34px;border-radius:50%;border:3px solid rgba(255,255,255,.12);border-top-color:#a855f7;animation:s .75s linear infinite}" +
+                "<style>html,body{margin:0;height:100%;background:#111215;color:#e5e7eb;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",Roboto,sans-serif}" +
+                "body{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;text-align:center}" +
+                ".r{width:18px;height:18px;border-radius:50%;border:2px solid #2e3138;border-top-color:#e5e7eb;animation:s .7s linear infinite}" +
                 "@keyframes s{to{transform:rotate(360deg)}}" +
-                "b{font-size:15px;font-weight:600}p{margin:0;font-size:13px;color:#94a3b8}" +
-                "#app{position:fixed;inset:0;width:100%;height:100%;border:0;background:#0a0c10;opacity:0;transition:opacity .2s ease;z-index:10}" +
-                "#app.in{opacity:1}</style></head><body>" +
-                "<div class=\"r\"></div><b>Preparing Waved...</b><p>Please keep this tab open while it loads.</p>" +
+                "b{font-size:14px;font-weight:600}p{margin:0;font-size:12px;color:#8b909a}" +
+                "</style></head><body>" +
+                "<div class=\"r\"></div><b>Preparing Waved...</b><p>Loading into this tab.</p>" +
                 "</body></html>";
         }
 
@@ -211,15 +211,15 @@
                 userRequestedCloak = true;
                 if (loadedHtml) {
                     const ok = openInAboutBlank(loadedHtml);
-                    if (!ok && btnCloakText) btnCloakText.textContent = "Popup blocked — allow popups";
+                    if (!ok && btnCloakText) btnCloakText.textContent = "Popup blocked - allow popups";
                 } else {
                     if (!cloakTargetWin || cloakTargetWin.closed) {
                         cloakTargetWin = openBlank();
                     }
                     if (!cloakTargetWin) {
-                        if (btnCloakText) btnCloakText.textContent = "Popup blocked — allow popups";
+                        if (btnCloakText) btnCloakText.textContent = "Popup blocked - allow popups";
                     } else if (btnCloakText) {
-                        btnCloakText.textContent = "⏳ Opening when ready...";
+                        btnCloakText.textContent = "Opening when ready...";
                     }
                 }
             });
@@ -230,26 +230,11 @@
                 const targetWin = (cloakTargetWin && !cloakTargetWin.closed) ? cloakTargetWin : openBlank();
                 if (!targetWin) return false;
                 const safeHtml = injectCompat(html);
-                try {
-                    // Render inside fullscreen srcdoc iframe to keep tab icon/title cloaked cleanly
-                    const f = targetWin.document.createElement("iframe");
-                    f.id = "app";
-                    f.title = "Waved";
-                    f.setAttribute("allow", "fullscreen; clipboard-read; clipboard-write; autoplay; microphone; camera; geolocation; encrypted-media; picture-in-picture");
-                    let shown = false;
-                    const show = () => { if (!shown) { shown = true; f.classList.add("in"); } };
-                    f.addEventListener("load", show);
-                    setTimeout(show, 1500);
-                    f.srcdoc = safeHtml;
-                    targetWin.document.body.appendChild(f);
-                    void f.offsetWidth;
-                } catch (_) {
-                    targetWin.document.open();
-                    targetWin.document.write(safeHtml);
-                    targetWin.document.close();
-                    stampIdentity(targetWin, "Waved");
-                }
-                if (btnCloakText) btnCloakText.textContent = "✓ Opened in about:blank";
+                targetWin.document.open();
+                targetWin.document.write(safeHtml);
+                targetWin.document.close();
+                stampIdentity(targetWin, "Waved");
+                if (btnCloakText) btnCloakText.textContent = "Opened in about:blank";
                 return true;
             } catch (err) {
                 console.error("Cloak window write error:", err);
