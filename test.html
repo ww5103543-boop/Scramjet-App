@@ -74,11 +74,13 @@
         const CONNECT_TIMEOUT_MS = 4500;
         const STALL_TIMEOUT_MS = 12000;
         const MIN_LEN = 50000;
-        const EST_BYTES = 4293532;
+        const BUILD_VER = "b4020fc";
+        const CACHE_VER_KEY = "waved.launcherVer";
+        const EST_BYTES = 2416855;
 
         // Only try relative ./singlefile.html on HTTP(S) origins (avoids CORS error on file:// or data:)
         const mirrorList = [
-            "aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL3d3NTEwMzU0My1ib29wL1NjcmFtamV0LUFwcC81OTVjZmU3L3NpbmdsZWZpbGUuaHRtbA==",
+            "aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL3d3NTEwMzU0My1ib29wL1NjcmFtamV0LUFwcC9iNDAyMGZjL3NpbmdsZWZpbGUuaHRtbA==",
             "aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tL3d3NTEwMzU0My1ib29wL1NjcmFtamV0LUFwcC9tYWluL3NpbmdsZWZpbGUuaHRtbA==",
             "aHR0cHM6Ly9jZG4uanNkZWxpdnIubmV0L2doL3d3NTEwMzU0My1ib29wL1NjcmFtamV0LUFwcEBtYWluL3NpbmdsZWZpbGUuaHRtbA==",
             "aHR0cHM6Ly9mYXN0bHkuanNkZWxpdnIubmV0L2doL3d3NTEwMzU0My1ib29wL1NjcmFtamV0LUFwcEBtYWluL3NpbmdsZWZpbGUuaHRtbA==",
@@ -289,25 +291,38 @@
             });
         }
 
+        function isValidLauncherHtml(html) {
+            return typeof html === "string" && html.length >= MIN_LEN && html.toLowerCase().indexOf("<html") !== -1;
+        }
+
         async function saveCache(html) {
-            try { localStorage.setItem(CACHE_KEY, html); } catch (_) {}
+            let idbSaved = false;
             try {
                 const db = await openIDB();
                 await new Promise((res, rej) => {
                     const tx = db.transaction(IDB_STORE, "readwrite");
-                    tx.objectStore(IDB_STORE).put(html, CACHE_KEY);
+                    tx.objectStore(IDB_STORE).put({ ver: BUILD_VER, html }, CACHE_KEY);
                     tx.oncomplete = () => res();
                     tx.onerror = () => rej(tx.error);
+                    tx.onabort = () => rej(tx.error || new Error("aborted"));
                 });
                 db.close();
+                idbSaved = true;
+            } catch (_) {}
+            if (idbSaved) {
+                try {
+                    localStorage.removeItem(CACHE_KEY);
+                    localStorage.removeItem(CACHE_VER_KEY);
+                } catch (_) {}
+                return;
+            }
+            try {
+                localStorage.setItem(CACHE_KEY, html);
+                localStorage.setItem(CACHE_VER_KEY, BUILD_VER);
             } catch (_) {}
         }
 
         async function readCache() {
-            try {
-                const c = localStorage.getItem(CACHE_KEY);
-                if (c && c.toLowerCase().indexOf("<html") !== -1 && c.length >= MIN_LEN) return c;
-            } catch (_) {}
             try {
                 const db = await openIDB();
                 const c = await new Promise((res, rej) => {
@@ -317,7 +332,18 @@
                     req.onerror = () => rej(req.error);
                 });
                 db.close();
-                if (typeof c === "string" && c.toLowerCase().indexOf("<html") !== -1 && c.length >= MIN_LEN) return c;
+                if (c && typeof c === "object" && isValidLauncherHtml(c.html)) {
+                    return { ver: typeof c.ver === "string" ? c.ver : "", html: c.html };
+                }
+                if (isValidLauncherHtml(c)) {
+                    return { ver: "", html: c };
+                }
+            } catch (_) {}
+            try {
+                const c = localStorage.getItem(CACHE_KEY);
+                if (isValidLauncherHtml(c)) {
+                    return { ver: localStorage.getItem(CACHE_VER_KEY) || "", html: c };
+                }
             } catch (_) {}
             return null;
         }
@@ -325,15 +351,16 @@
         async function fromCache() {
             const cached = await readCache();
             if (!cached) return false;
-            loadedHtml = cached;
+            loadedHtml = cached.html;
             p.style.width = "100%";
             t.textContent = "Loaded from offline cache";
-            n.textContent = "100% · " + fmt(cached.length);
-            if (userRequestedCloak && openInAboutBlank(cached)) {
+            n.textContent = "100% · " + fmt(cached.html.length);
+            if (userRequestedCloak && openInAboutBlank(cached.html)) {
+                busy = false;
                 t.textContent = "Launched in about:blank!";
                 return true;
             }
-            run(cached);
+            run(cached.html);
             return true;
         }
 
@@ -352,9 +379,10 @@
         async function fetchSource(url) {
             const ctrl = window.AbortController ? new AbortController() : null;
             let connectTimer = setTimeout(() => { if (ctrl) ctrl.abort(); }, CONNECT_TIMEOUT_MS);
+            const isPinned = /^https:\/\/raw\.githubusercontent\.com\/[^/]+\/[^/]+\/[0-9a-f]{7,40}\/singlefile\.html$/i.test(url);
             try {
-                const r = await fetch(cacheBustedUrl(url), {
-                    cache: "no-store",
+                const r = await fetch(isPinned ? url : cacheBustedUrl(url), {
+                    cache: isPinned ? "force-cache" : "no-store",
                     signal: ctrl ? ctrl.signal : undefined
                 });
                 clearTimeout(connectTimer);
@@ -434,8 +462,26 @@
             busy = true;
             if (bodyEl) bodyEl.classList.remove("err");
             t.textContent = "Loading Waved...";
-            n.textContent = "Grabbing the latest version...";
+            n.textContent = "Checking offline cache...";
             p.style.width = "0%";
+
+            const cached = await readCache();
+            if (cached && cached.ver === BUILD_VER) {
+                loadedHtml = cached.html;
+                p.style.width = "100%";
+                t.textContent = "Launching Waved...";
+                n.textContent = "Cached · " + fmt(cached.html.length);
+                if (userRequestedCloak && openInAboutBlank(cached.html)) {
+                    busy = false;
+                    t.textContent = "Launched in about:blank!";
+                    n.textContent = "You can switch to the new tab.";
+                    return;
+                }
+                run(cached.html);
+                return;
+            }
+
+            n.textContent = "Grabbing the latest version...";
 
             for (let i = 0; i < u.length; i++) {
                 try {
