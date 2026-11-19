@@ -2244,48 +2244,104 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       }
     } catch {}
 
-    // Blob Asset Cache & Resource Hydrators (all through Wisp)
-    function fetchBlobUrl(rawUrl, fallbackMime = "") {
+    // Asset Cache & Resource Hydrators (all through Wisp)
+    const dataUrlCache = new Map();
+
+    function u8ToBase64(u8) {
+      let bin = "";
+      const chunk = 0x8000;
+      for (let i = 0; i < u8.length; i += chunk) {
+        bin += String.fromCharCode.apply(null, u8.subarray(i, i + chunk));
+      }
+      return btoa(bin);
+    }
+
+    function guessFontMime(urlStr) {
+      const clean = String(urlStr || "").split(/[?#]/)[0].toLowerCase();
+      if (clean.endsWith(".woff2")) return "font/woff2";
+      if (clean.endsWith(".woff")) return "font/woff";
+      if (clean.endsWith(".ttf")) return "font/ttf";
+      if (clean.endsWith(".otf")) return "font/otf";
+      if (clean.endsWith(".eot")) return "application/vnd.ms-fontobject";
+      return "";
+    }
+
+    function fetchBlobUrl(rawUrl, fallbackMime = "", preferDataForFonts = false) {
       const abs = resolveVirtualUrl(rawUrl);
       if (!abs || isSkippableScheme(abs)) return Promise.resolve(abs);
-      if (blobUrlCache.has(abs)) return blobUrlCache.get(abs);
+      const isFontUrl = preferDataForFonts && Boolean(guessFontMime(abs));
+      const cache = isFontUrl ? dataUrlCache : blobUrlCache;
+      if (cache.has(abs)) return cache.get(abs);
       const p = (async () => {
         const res = await wispRpcFetch(abs, { method: "GET" });
         if (res.status >= 400 || !res.body) throw new Error("Asset HTTP " + res.status);
-        let ctype = fallbackMime;
+        let ctype = fallbackMime || guessFontMime(abs);
         for (const h of res.headers || []) {
           if (String(h[0]).toLowerCase() === "content-type") {
-            ctype = String(h[1]).split(";")[0].trim();
+            const ct = String(h[1]).split(";")[0].trim();
+            if (ct) ctype = ct;
             break;
           }
         }
-        return URL.createObjectURL(new Blob([res.body], { type: ctype || "application/octet-stream" }));
+        const u8 = new Uint8Array(res.body);
+        if (preferDataForFonts && (/^font\/|woff|truetype|opentype|fontobject/i.test(ctype) || isFontUrl)) {
+          return `data:${ctype || "font/woff2"};base64,${u8ToBase64(u8)}`;
+        }
+        return URL.createObjectURL(new Blob([u8], { type: ctype || "application/octet-stream" }));
       })();
-      p.catch(() => blobUrlCache.delete(abs));
-      blobUrlCache.set(abs, p);
+      p.catch(() => cache.delete(abs));
+      cache.set(abs, p);
       return p;
     }
 
-    async function hydrateCssUrls(cssText, cssUrl) {
+    async function hydrateCssUrls(cssText, cssUrl, depth = 0) {
+      if (!cssText) return "";
+      let workingCss = String(cssText);
+
+      // Inline @import rules up to depth 2 so imported stylesheets get font/url rewriting too
+      if (depth < 2) {
+        const importRe = /@import\s+(?:url\(\s*)?(['"]?)([^'")\s;]+)\1\s*\)?([^;]*);/gi;
+        const imports = [];
+        let im;
+        while ((im = importRe.exec(workingCss)) !== null) {
+          if (im[2] && !isSkippableScheme(im[2])) imports.push({ full: im[0], ref: im[2], media: (im[3] || "").trim() });
+        }
+        if (imports.length) {
+          const importMap = new Map();
+          await Promise.all(imports.slice(0, 12).map(async (item) => {
+            try {
+              const abs = new URL(item.ref, cssUrl).href;
+              const msg = await wispRpcFetch(abs, { method: "GET" });
+              if (msg.status >= 200 && msg.status < 400 && msg.body) {
+                const subCss = new TextDecoder().decode(new Uint8Array(msg.body));
+                const rewrittenSub = await hydrateCssUrls(subCss, msg.url || abs, depth + 1);
+                importMap.set(item.full, item.media ? `@media ${item.media} { ${rewrittenSub} }` : rewrittenSub);
+              }
+            } catch {}
+          }));
+          workingCss = workingCss.replace(importRe, (full) => importMap.get(full) || "");
+        }
+      }
+
       const matches = [];
       const re = /url\(\s*(['"]?)([^'")]+)\1\s*\)/gi;
       let m;
-      while ((m = re.exec(cssText)) !== null) {
+      while ((m = re.exec(workingCss)) !== null) {
         const ref = m[2].trim();
         if (!ref || isSkippableScheme(ref)) continue;
         matches.push(ref);
       }
-      if (!matches.length) return cssText;
-      const unique = Array.from(new Set(matches)).slice(0, 40);
+      if (!matches.length) return workingCss;
+      const unique = Array.from(new Set(matches)).slice(0, 250);
       const replacements = new Map();
       await Promise.all(unique.map(async (ref) => {
         try {
           const abs = new URL(ref, cssUrl).href;
-          const bUrl = await fetchBlobUrl(abs);
-          replacements.set(ref, bUrl);
+          const resolvedAsset = await fetchBlobUrl(abs, "", true);
+          replacements.set(ref, resolvedAsset);
         } catch {}
       }));
-      return cssText.replace(re, (full, q, ref) => {
+      return workingCss.replace(re, (full, q, ref) => {
         const trimmed = ref.trim();
         const repl = replacements.get(trimmed);
         return repl ? `url("${repl}")` : full;
@@ -2295,7 +2351,23 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     async function hydrateElementAssets(rootEl) {
       if (!rootEl || typeof rootEl.querySelectorAll !== "function") return;
 
-      const links = rootEl.matches && rootEl.matches("link[data-wisp-href]")
+      // Hydrate inline <style> tags (e.g. @font-face / background url(...) in <head>/<body>)
+      const inlineStyles = rootEl.matches && rootEl.matches("style")
+        ? [rootEl]
+        : Array.from(rootEl.querySelectorAll("style"));
+      const inlineStyleJobs = inlineStyles.map(async (st) => {
+        if (hydratedEls.has(st) || native.getAttribute.call(st, "data-wisp-for")) return;
+        const stashedCss = native.getAttribute.call(st, "data-wisp-css");
+        const rawCss = stashedCss || st.textContent || "";
+        if (!stashedCss && !rawCss.includes("url(") && !/@import/i.test(rawCss)) return;
+        hydratedEls.add(st);
+        try {
+          const fixed = await hydrateCssUrls(rawCss, curBase);
+          if (stashedCss || fixed !== rawCss) st.textContent = fixed;
+        } catch {}
+      });
+
+      const links = rootEl.matches && rootEl.matches("link[data-wisp-href], link[href]")
         ? [rootEl]
         : Array.from(rootEl.querySelectorAll("link[data-wisp-href], link[href]"));
       const styleJobs = links.map(async (link) => {
@@ -2313,20 +2385,26 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
               const css = new TextDecoder().decode(new Uint8Array(msg.body));
               const fixedCss = await hydrateCssUrls(css, msg.url || abs);
               const style = doc.createElement("style");
+              native.setAttribute.call(style, "data-wisp-for", abs);
               style.textContent = fixedCss;
-              if (link.parentNode) link.parentNode.replaceChild(style, link);
+              if (link.parentNode) link.parentNode.insertBefore(style, link.nextSibling);
+              link.dispatchEvent(new Event("load"));
+              return;
             }
           } else {
             const bUrl = await fetchBlobUrl(abs);
             if (native.linkHref && native.linkHref.set) native.linkHref.set.call(link, bUrl);
+            return;
           }
         } catch {}
+        link.dispatchEvent(new Event("error"));
       });
 
       const media = Array.from(rootEl.querySelectorAll("[data-wisp-src],[data-wisp-poster],img,source,video,audio"));
       if (rootEl.matches && rootEl.matches("img,source,video,audio")) media.unshift(rootEl);
       for (const el of media) {
         if (hydratedEls.has(el)) continue;
+        if (el.tagName === "SCRIPT") continue;
         const rawSrc = native.getAttribute.call(el, "data-wisp-src") || native.getAttribute.call(el, "src") || "";
         const rawPoster = native.getAttribute.call(el, "data-wisp-poster") || native.getAttribute.call(el, "poster") || "";
         if (!rawSrc && !rawPoster) continue;
@@ -2351,11 +2429,13 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         const srcAttr = native.getAttribute.call(sc, "src");
         if (!srcAttr || isSkippableScheme(srcAttr)) continue;
         hydratedEls.add(sc);
+        const abs = resolveVirtualUrl(srcAttr);
+        native.setAttribute.call(sc, "data-wisp-src", abs);
         native.removeAttribute.call(sc, "src");
-        runDynamicExternalScript(sc, srcAttr);
+        runDynamicExternalScript(sc, abs);
       }
 
-      await Promise.allSettled(styleJobs);
+      await Promise.allSettled([...inlineStyleJobs, ...styleJobs]);
     }
 
     function executeJsCode(code, labelUrl, scriptEl, isModule = false) {
@@ -2380,6 +2460,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
 
     async function runDynamicExternalScript(scriptEl, srcUrl) {
       const abs = resolveVirtualUrl(srcUrl);
+      native.setAttribute.call(scriptEl, "data-wisp-src", abs);
       const isMod = (native.getAttribute.call(scriptEl, "type") || "").toLowerCase() === "module";
       try {
         const msg = await wispRpcFetch(abs, { method: "GET", rewriteJs: true, isModule: isMod });
@@ -2398,7 +2479,15 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       try {
         Object.defineProperty(proto, propName, {
           configurable: true,
-          get() { return desc.get.call(this); },
+          get() {
+            if (this instanceof HTMLScriptElement) {
+              return native.getAttribute.call(this, "data-wisp-src") || native.getAttribute.call(this, "data-wisp-pending-src") || desc.get.call(this);
+            }
+            if (this instanceof HTMLLinkElement && propName === "href") {
+              return native.getAttribute.call(this, "data-wisp-href") || desc.get.call(this);
+            }
+            return desc.get.call(this);
+          },
           set(val) {
             const str = String(val ?? "");
             if (!str || isSkippableScheme(str)) return desc.set.call(this, val);
@@ -2417,9 +2506,11 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
               return;
             }
             if (this instanceof HTMLScriptElement) {
+              const abs = resolveVirtualUrl(str);
+              native.setAttribute.call(this, "data-wisp-src", abs);
               hydratedEls.add(this);
-              if (this.isConnected) runDynamicExternalScript(this, str);
-              else native.setAttribute.call(this, "data-wisp-pending-src", str);
+              if (this.isConnected) runDynamicExternalScript(this, abs);
+              else native.setAttribute.call(this, "data-wisp-pending-src", abs);
               return;
             }
             if (this instanceof HTMLIFrameElement) {
@@ -2440,6 +2531,18 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     patchSrcSetter(HTMLIFrameElement.prototype, "src", native.iframeSrc);
 
     try {
+      Element.prototype.getAttribute = function (name) {
+        const low = String(name).toLowerCase();
+        if (low === "src" && this instanceof HTMLScriptElement) {
+          const ws = native.getAttribute.call(this, "data-wisp-src") || native.getAttribute.call(this, "data-wisp-pending-src");
+          if (ws) return ws;
+        }
+        if (low === "href" && this instanceof HTMLLinkElement) {
+          const wh = native.getAttribute.call(this, "data-wisp-href");
+          if (wh) return wh;
+        }
+        return native.getAttribute.call(this, name);
+      };
       Element.prototype.setAttribute = function (name, val) {
         const low = String(name).toLowerCase();
         const str = String(val ?? "");
@@ -2454,9 +2557,11 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
             return;
           }
           if (this instanceof HTMLScriptElement && low === "src") {
+            const abs = resolveVirtualUrl(str);
+            native.setAttribute.call(this, "data-wisp-src", abs);
             hydratedEls.add(this);
-            if (this.isConnected) runDynamicExternalScript(this, str);
-            else native.setAttribute.call(this, "data-wisp-pending-src", str);
+            if (this.isConnected) runDynamicExternalScript(this, abs);
+            else native.setAttribute.call(this, "data-wisp-pending-src", abs);
             return;
           }
           if (this instanceof HTMLIFrameElement && low === "src") {
@@ -2630,7 +2735,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     return clean === "module" || /^(?:application|text)\/(?:x-)?(?:javascript|ecmascript)$/.test(clean) || /^text\/javascript1\.[0-5]$/.test(clean);
   }
 
-  async function prepareHtmlForSrcdoc(html, finalUrl, token, referrerUrl) {
+  async function prepareHtmlForDocument(html, finalUrl, token, referrerUrl) {
     const doc = new DOMParser().parseFromString(html, "text/html");
     let docBaseUrl = finalUrl;
     const baseEl = doc.querySelector("base[href]");
@@ -2684,6 +2789,9 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
           })
         );
       }
+      if (entry.src) {
+        sc.setAttribute("data-wisp-src", entry.src);
+      }
       sc.removeAttribute("src");
       sc.removeAttribute("integrity");
       sc.removeAttribute("nonce");
@@ -2734,6 +2842,14 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     doc.querySelectorAll("iframe[src]").forEach((ifr) => {
       ifr.setAttribute("data-wisp-iframe-src", resolveSafeUrl(ifr.getAttribute("src"), docBaseUrl));
       ifr.removeAttribute("src");
+    });
+
+    doc.querySelectorAll("style").forEach((st) => {
+      const css = st.textContent || "";
+      if (css.includes("url(") || /@import/i.test(css)) {
+        st.setAttribute("data-wisp-css", css);
+        st.textContent = "";
+      }
     });
 
     doc.querySelectorAll("a[ping]").forEach((a) => a.removeAttribute("ping"));
@@ -2922,6 +3038,29 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     }
   });
 
+  async function writeHtmlIntoIframe(frameEl, htmlStr) {
+    frameEl.removeAttribute("srcdoc");
+    await new Promise((resolve) => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        frameEl.removeEventListener("load", done);
+        resolve();
+      };
+      frameEl.addEventListener("load", done, { once: true });
+      frameEl.src = "about:blank";
+      setTimeout(done, 180);
+    });
+    const idoc = frameEl.contentDocument || (frameEl.contentWindow && frameEl.contentWindow.document);
+    if (!idoc) {
+      throw new Error("Unable to access iframe document");
+    }
+    idoc.open();
+    idoc.write(htmlStr);
+    idoc.close();
+  }
+
   async function renderStandaloneProxyPage(frameEl, targetUrl, pushHist = true, reqOpts = {}) {
     if (!frameEl) return;
     const cleanTarget = String(targetUrl || "").trim();
@@ -2967,10 +3106,9 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       const contentType = getHeaderValue(res.headers, "content-type").toLowerCase();
       if (!contentType || contentType.includes("text/html") || contentType.includes("application/xhtml")) {
         const html = new TextDecoder().decode(res.bodyBytes);
-        const prepared = await prepareHtmlForSrcdoc(html, res.finalUrl, token, /^https?:\/\//i.test(prevRef) ? prevRef : "");
+        const prepared = await prepareHtmlForDocument(html, res.finalUrl, token, /^https?:\/\//i.test(prevRef) ? prevRef : "");
         if (!activeSession || activeSession.token !== token) return;
-        frameEl.removeAttribute("src");
-        frameEl.srcdoc = prepared;
+        await writeHtmlIntoIframe(frameEl, prepared);
       } else {
         const blob = new Blob([res.bodyBytes], { type: contentType.split(";")[0] || "application/octet-stream" });
         const blobUrl = URL.createObjectURL(blob);
@@ -2979,8 +3117,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       }
     } catch (err) {
       if (!activeSession || activeSession.token !== token) return;
-      frameEl.removeAttribute("src");
-      frameEl.srcdoc = renderErrorHtml(cleanTarget, err && err.message ? err.message : String(err));
+      await writeHtmlIntoIframe(frameEl, renderErrorHtml(cleanTarget, err && err.message ? err.message : String(err))).catch(() => {});
     } finally {
       if (typeof window.finishProgress === "function") window.finishProgress();
     }
