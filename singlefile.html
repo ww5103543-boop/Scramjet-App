@@ -2209,6 +2209,37 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     Object.defineProperty(win, "$scramjet__location", { configurable: true, get: () => wispLocation, set: (v) => { wispLocation.href = v; } });
     Object.defineProperty(win, "$scramjet__top", { configurable: true, get: () => win });
     Object.defineProperty(win, "$scramjet__parent", { configurable: true, get: () => win });
+    try {
+      Object.defineProperty(Object.prototype, "$scramjet__location", {
+        configurable: true,
+        enumerable: false,
+        get() {
+          if (this === win || this === doc) return wispLocation;
+          return this.location;
+        },
+        set(v) {
+          if (this === win || this === doc) {
+            wispLocation.href = v;
+            return;
+          }
+          this.location = v;
+        }
+      });
+      Object.defineProperty(Object.prototype, "$scramjet__top", {
+        configurable: true,
+        enumerable: false,
+        get() {
+          return this === win ? win : this.top;
+        }
+      });
+      Object.defineProperty(Object.prototype, "$scramjet__parent", {
+        configurable: true,
+        enumerable: false,
+        get() {
+          return this === win ? win : this.parent;
+        }
+      });
+    } catch {}
 
     // XMLHttpRequest over proxiedFetch
     class WispXHR extends EventTarget {
