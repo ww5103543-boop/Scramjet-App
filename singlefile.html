@@ -779,20 +779,8 @@ function setupWavedFrameHooks() {
 			try {
 				const w = window.open("about:blank", "_blank");
 				if (w && !w.closed) {
-					const clone = document.documentElement.cloneNode(true);
-					const cFrame = clone.querySelector("#frame");
-					if (cFrame) {
-						cFrame.removeAttribute("src");
-						cFrame.removeAttribute("srcdoc");
-					}
-					const cHome = clone.querySelector("#home");
-					if (cHome) cHome.hidden = false;
-					const cBrowser = clone.querySelector("#browser");
-					if (cBrowser) cBrowser.hidden = true;
-					const cDbg = clone.querySelector("#waved-debug-panel");
-					if (cDbg) cDbg.remove();
 					w.document.open();
-					w.document.write("<!doctype html>" + clone.outerHTML);
+					w.document.write("<!doctype html>" + document.documentElement.outerHTML);
 					w.document.close();
 				}
 			} catch(e) {}
@@ -823,18 +811,10 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
 	};
 	const config = { ...defaultConfig, ...userConfig };
 
-	// 1. On HTTP/HTTPS origins, probe /sw.js once before attempting SW registration
+	// 1. On HTTP/HTTPS origins, register the real Scramjet Service Worker
 	let sw = null;
 	if (location.protocol !== "file:" && "serviceWorker" in navigator) {
-		let hasSw = false;
-		try {
-			const ac = new AbortController();
-			const tm = setTimeout(() => ac.abort(), 1200);
-			const probe = await fetch(config.swPath, { method: "HEAD", signal: ac.signal });
-			clearTimeout(tm);
-			hasSw = probe.ok;
-		} catch {}
-		const swCandidates = hasSw ? [config.swPath, "./sw.js", "sw.js"] : [];
+		const swCandidates = [config.swPath, "./sw.js", "sw.js"];
 		for (const path of swCandidates) {
 			try {
 				const reg = await navigator.serviceWorker.register(path, { type: "classic", updateViaCache: "none" });
@@ -1166,12 +1146,16 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
   // 1. Persisted Session CookieJar (localStorage-backed for persistent cookies)
   // ---------------------------------------------------------------------------
   const COOKIE_STORAGE_KEY = "waved_proxy_cookies_v1";
+  const MAX_COOKIE_BYTES = 4096;
+  const MAX_COOKIES_PER_DOMAIN = 180;
+  const MAX_COOKIE_HEADER_BYTES = 12288;
 
   class WispCookieJar {
     constructor() {
-      /** @type {Map<string, {name:string,value:string,domain:string,path:string,hostOnly:boolean,secure:boolean,expires:number}>} */
+      /** @type {Map<string, {name:string,value:string,domain:string,path:string,hostOnly:boolean,secure:boolean,expires:number,createdAt:number,seq:number}>} */
       this.store = new Map();
       this._saveTimer = 0;
+      this._seq = 0;
       this._loadPersisted();
       if (typeof window !== "undefined") {
         window.addEventListener("pagehide", () => this._flushPersist());
@@ -1186,11 +1170,40 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         if (!Array.isArray(arr)) return;
         const now = Date.now();
         for (const entry of arr) {
-          if (entry && entry.key && entry.val && entry.val.expires > now) {
+          if (
+            entry && entry.key && entry.val &&
+            entry.val.expires > now &&
+            (String(entry.val.name || "").length + String(entry.val.value || "").length) <= MAX_COOKIE_BYTES
+          ) {
+            entry.val.createdAt = Number(entry.val.createdAt) || now;
+            entry.val.seq = ++this._seq;
             this.store.set(entry.key, entry.val);
           }
         }
       } catch { }
+    }
+
+    _isEphemeralCookie(c, now = Date.now()) {
+      return /^ST-/i.test(c.name) || (Number.isFinite(c.expires) && (c.expires - now) <= 120000);
+    }
+
+    _evictDomainExcess(domain, now = Date.now()) {
+      const domEntries = [];
+      for (const [k, c] of this.store.entries()) {
+        if (c.domain === domain) domEntries.push([k, c]);
+      }
+      if (domEntries.length <= MAX_COOKIES_PER_DOMAIN) return;
+      domEntries.sort(([, a], [, b]) => {
+        const ea = this._isEphemeralCookie(a, now) ? 0 : 1;
+        const eb = this._isEphemeralCookie(b, now) ? 0 : 1;
+        if (ea !== eb) return ea - eb;
+        if (a.expires !== b.expires) return a.expires - b.expires;
+        return ((a.createdAt || 0) - (b.createdAt || 0)) || ((a.seq || 0) - (b.seq || 0));
+      });
+      const excess = domEntries.length - MAX_COOKIES_PER_DOMAIN;
+      for (let i = 0; i < excess; i++) {
+        this.store.delete(domEntries[i][0]);
+      }
     }
 
     _flushPersist() {
@@ -1252,6 +1265,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       let cookiePath = slashIdx > 0 ? urlObj.pathname.slice(0, slashIdx) : "/";
       let secure = false;
       let expires = Infinity;
+      let hasMaxAge = false;
 
       for (let i = 1; i < parts.length; i++) {
         const attr = parts[i];
@@ -1270,19 +1284,36 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
           secure = true;
         } else if (k === "max-age") {
           const secs = parseInt(v, 10);
-          if (!Number.isNaN(secs)) expires = secs <= 0 ? 0 : Date.now() + secs * 1000;
-        } else if (k === "expires" && v) {
+          if (!Number.isNaN(secs)) {
+            hasMaxAge = true;
+            expires = secs <= 0 ? 0 : Date.now() + secs * 1000;
+          }
+        } else if (k === "expires" && v && !hasMaxAge) {
           const t = Date.parse(v);
           if (!Number.isNaN(t)) expires = t;
         }
       }
 
+      const now = Date.now();
       const key = `${domain}\t${cookiePath}\t${name}`;
-      if (expires <= Date.now()) {
+      if (expires <= now) {
         if (this.store.delete(key)) this._schedulePersist();
         return;
       }
-      this.store.set(key, { name, value, domain, path: cookiePath, hostOnly, secure, expires });
+      if (name.length + value.length > MAX_COOKIE_BYTES) return;
+
+      this.store.set(key, {
+        name,
+        value,
+        domain,
+        path: cookiePath,
+        hostOnly,
+        secure,
+        expires,
+        createdAt: now,
+        seq: ++this._seq
+      });
+      this._evictDomainExcess(domain, now);
       if (Number.isFinite(expires)) this._schedulePersist();
     }
 
@@ -1309,8 +1340,57 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         if (!this._pathMatches(urlObj.pathname || "/", c.path)) continue;
         matched.push(c);
       }
-      matched.sort((a, b) => b.path.length - a.path.length);
-      return matched.map((c) => `${c.name}=${c.value}`).join("; ");
+      if (!matched.length) return "";
+
+      const byRfcOrder = (a, b) =>
+        (b.path.length - a.path.length) ||
+        ((a.createdAt || 0) - (b.createdAt || 0)) ||
+        ((a.seq || 0) - (b.seq || 0));
+
+      matched.sort(byRfcOrder);
+      const joined = matched.map((c) => `${c.name}=${c.value}`).join("; ");
+      if (joined.length <= MAX_COOKIE_HEADER_BYTES) return joined;
+
+      const persistent = [];
+      const ephemeral = [];
+      for (const c of matched) {
+        if (this._isEphemeralCookie(c, now)) ephemeral.push(c);
+        else persistent.push(c);
+      }
+
+      const selected = [];
+      let totalLen = 0;
+      const tryAdd = (c) => {
+        const pairLen = c.name.length + 1 + c.value.length;
+        const added = (selected.length ? 2 : 0) + pairLen;
+        if (totalLen + added <= MAX_COOKIE_HEADER_BYTES) {
+          selected.push(c);
+          totalLen += added;
+          return true;
+        }
+        return false;
+      };
+
+      const persistentLen = persistent.reduce((sum, c, idx) => sum + (idx ? 2 : 0) + c.name.length + 1 + c.value.length, 0);
+      if (persistentLen <= MAX_COOKIE_HEADER_BYTES) {
+        for (const c of persistent) tryAdd(c);
+      } else {
+        persistent.sort((a, b) =>
+          ((b.createdAt || 0) - (a.createdAt || 0)) ||
+          ((b.seq || 0) - (a.seq || 0)) ||
+          (a.path.length - b.path.length)
+        );
+        for (const c of persistent) tryAdd(c);
+      }
+
+      ephemeral.sort((a, b) =>
+        ((b.createdAt || 0) - (a.createdAt || 0)) ||
+        ((b.seq || 0) - (a.seq || 0))
+      );
+      for (const c of ephemeral) tryAdd(c);
+
+      selected.sort(byRfcOrder);
+      return selected.map((c) => `${c.name}=${c.value}`).join("; ");
     }
   }
 
@@ -1646,7 +1726,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     return "";
   }
 
-  async function readTransportBodyBytes(body) {
+  async function readTransportBodyBytes(body, throwOnError = false) {
     if (!body) return new Uint8Array(0);
     if (body instanceof Uint8Array) return body;
     if (body instanceof ArrayBuffer) return new Uint8Array(body);
@@ -1654,7 +1734,10 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     try {
       const ab = await new Response(body).arrayBuffer();
       return new Uint8Array(ab);
-    } catch {
+    } catch (err) {
+      if (throwOnError) {
+        throw new Error("Body read failed: " + (err && err.message ? err.message : String(err)));
+      }
       return new Uint8Array(0);
     }
   }
@@ -1676,12 +1759,17 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       }
 
       const headerTuples = normalizeRequestHeaders(opts.headers, urlObj, opts.referrer, method, Boolean(opts.sendOrigin));
-      let res;
+      let res = null;
+      let resHeaders = [];
+      let status = 0;
+      let isRedirect = false;
+      let bodyBytes = new Uint8Array(0);
+
       for (let attempt = 0; attempt < 2; attempt++) {
         const ac = new AbortController();
-        const onOuterAbort = () => ac.abort();
+        const onOuterAbort = () => ac.abort(opts.signal.reason || new DOMException("Aborted", "AbortError"));
         if (opts.signal) {
-          if (opts.signal.aborted) ac.abort();
+          if (opts.signal.aborted) ac.abort(opts.signal.reason || new DOMException("Aborted", "AbortError"));
           else opts.signal.addEventListener("abort", onOuterAbort, { once: true });
         }
         const timer = setTimeout(() => ac.abort(new Error("Request timeout after " + timeoutMs + "ms")), timeoutMs);
@@ -1689,6 +1777,10 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         const needTag = !laneSockets[lane];
         const prevLane = pendingSocketLane;
         if (needTag) pendingSocketLane = lane;
+        const raceAbort = () => new Promise((_, rej) => {
+          if (ac.signal.aborted) rej(ac.signal.reason || new Error("Request timed out: " + curUrl));
+          else ac.signal.addEventListener("abort", () => rej(ac.signal.reason || new Error("Request timed out: " + curUrl)), { once: true });
+        });
         try {
           usedTransport = await getWispTransport(lane);
           if (laneSockets[lane] && !isLaneSocketHealthy(lane)) {
@@ -1697,8 +1789,24 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
           }
           res = await Promise.race([
             usedTransport.request(urlObj, method, body, headerTuples, ac.signal),
-            new Promise((_, rej) => ac.signal.addEventListener("abort", () => rej(new Error("Request timed out: " + curUrl)), { once: true }))
+            raceAbort()
           ]);
+          // Epoxy decompresses Rust-side, so strip stale content-encoding / compressed content-length
+          resHeaders = (Array.isArray(res.headers) ? res.headers : Object.entries(res.headers || {}))
+            .filter((entry) => {
+              if (!entry || entry.length < 2) return false;
+              const k = String(entry[0]).toLowerCase();
+              return k !== "content-encoding" && k !== "content-length";
+            });
+          status = Number(res.status) || 0;
+          const loc = getHeaderValue(resHeaders, "location");
+          isRedirect = Boolean(followRedirects && loc && status >= 300 && status < 400 && hop < MAX_REDIRECTS);
+          if (!isRedirect) {
+            const noBody = method === "HEAD" || status === 204 || status === 205 || status === 304;
+            bodyBytes = noBody
+              ? new Uint8Array(0)
+              : await Promise.race([readTransportBodyBytes(res.body, true), raceAbort()]);
+          }
           break;
         } catch (err) {
           if (opts.signal && opts.signal.aborted) throw err;
@@ -1716,19 +1824,10 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         }
       }
 
-      // Epoxy decompresses Rust-side, so strip stale content-encoding / compressed content-length
-      const resHeaders = (Array.isArray(res.headers) ? res.headers : Object.entries(res.headers || {}))
-        .filter((entry) => {
-          if (!entry || entry.length < 2) return false;
-          const k = String(entry[0]).toLowerCase();
-          return k !== "content-encoding" && k !== "content-length";
-        });
       cookieJar.ingestHeaders(resHeaders, urlObj);
 
-      const status = Number(res.status) || 0;
-
-      const loc = getHeaderValue(resHeaders, "location");
-      if (followRedirects && loc && status >= 300 && status < 400 && hop < MAX_REDIRECTS) {
+      if (isRedirect) {
+        const loc = getHeaderValue(resHeaders, "location");
         await readTransportBodyBytes(res.body).catch(() => { });
         const nextUrl = new URL(loc, urlObj).href;
         if (status === 301 || status === 302 || status === 303) {
@@ -1742,7 +1841,6 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         continue;
       }
 
-      const bodyBytes = method === "HEAD" ? new Uint8Array(0) : await readTransportBodyBytes(res.body);
       return {
         status,
         statusText: res.statusText || "",
@@ -1912,6 +2010,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         }
         const onAbort = () => {
           pendingRequests.delete(id);
+          sendToParent({ type: "cancel", id });
           reject(new DOMException("Aborted", "AbortError"));
         };
         if (fetchInit.signal) {
@@ -2657,13 +2756,49 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       configurable: true,
       get: () => curCookies,
       set: (val) => {
-        const first = String(val).split(";")[0];
+        const parts = String(val).split(";").map((s) => s.trim()).filter(Boolean);
+        if (!parts.length) return;
+        const first = parts[0];
         const eq = first.indexOf("=");
-        if (eq > 0) {
-          const k = first.slice(0, eq).trim();
-          curCookies = curCookies.split(/;\s*/).filter((c) => c && c.split("=")[0] !== k).concat(first.trim()).join("; ");
-          sendToParent({ type: "cookie", value: String(val), url: curUrl });
+        if (eq <= 0) return;
+        const k = first.slice(0, eq).trim();
+        const v = first.slice(eq + 1).trim();
+        if (!k) return;
+
+        let hasMaxAge = false;
+        let maxAgeSecs = 0;
+        let hasExpires = false;
+        let expTs = Infinity;
+        for (let i = 1; i < parts.length; i++) {
+          const attr = parts[i];
+          const aEq = attr.indexOf("=");
+          const ak = (aEq >= 0 ? attr.slice(0, aEq) : attr).trim().toLowerCase();
+          const av = aEq >= 0 ? attr.slice(aEq + 1).trim() : "";
+          if (ak === "max-age") {
+            const secs = parseInt(av, 10);
+            if (!Number.isNaN(secs)) {
+              hasMaxAge = true;
+              maxAgeSecs = secs;
+            }
+          } else if (ak === "expires" && av) {
+            const t = Date.parse(av);
+            if (!Number.isNaN(t)) {
+              hasExpires = true;
+              expTs = t;
+            }
+          }
         }
+
+        const isDeletion = (hasMaxAge && maxAgeSecs <= 0) || (!hasMaxAge && hasExpires && expTs <= Date.now());
+        if (isDeletion) {
+          curCookies = curCookies.split(/;\s*/).filter((c) => c && c.split("=")[0].trim() !== k).join("; ");
+          sendToParent({ type: "cookie", value: String(val), url: curUrl });
+          return;
+        }
+        if (k.length + v.length > 4096) return;
+
+        curCookies = curCookies.split(/;\s*/).filter((c) => c && c.split("=")[0].trim() !== k).concat(`${k}=${v}`).join("; ");
+        sendToParent({ type: "cookie", value: String(val), url: curUrl });
       }
     };
     try {
@@ -3919,8 +4054,16 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
   const activeSockets = new Map();
 
   function cleanupSession() {
-    if (activeSession && activeSession.port) {
-      try { activeSession.port.close(); } catch { }
+    if (activeSession) {
+      if (activeSession.reqControllers) {
+        for (const ac of activeSession.reqControllers.values()) {
+          try { ac.abort(new Error("Session navigated")); } catch { }
+        }
+        activeSession.reqControllers.clear();
+      }
+      if (activeSession.port) {
+        try { activeSession.port.close(); } catch { }
+      }
     }
     for (const sock of activeSockets.values()) {
       try { if (sock && typeof sock.close === "function") sock.close(1000, "Navigate"); } catch { }
@@ -3962,8 +4105,8 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
   function classifyRequestPriority(msg) {
     if (msg.rewriteJs || msg.priority === "high") return "high";
     const u = String(msg.url || "");
-    if (/\.css(?:[?#]|$)/i.test(u)) return "high";
-    if (msg.priority === "low") return "low";
+    if (/\.css(?:[?#]|$)/i.test(u) || /\/youtubei\/v1\//i.test(u)) return "high";
+    if (msg.priority === "low" || /\.googlevideo\.com\/videoplayback\b/i.test(u)) return "low";
     if (/\.(?:woff2?|ttf|otf|eot|ico|png|jpe?g|gif|webp|svg)(?:[?#]|$)/i.test(u) || /:\/\/external-content\.duckduckgo\.com\//i.test(u)) {
       return "low";
     }
@@ -4297,7 +4440,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       if (idbHit) return { entry: idbHit, fromCache: true };
     }
 
-    const canDedupe = isIdempotent && !opts.body && !hasRangeHeader(opts.headers);
+    const canDedupe = isIdempotent && !opts.body && !opts.signal && !hasRangeHeader(opts.headers);
     const inFlightKey = canDedupe
       ? `${opts.token || "global"}:${reqMethod}:${opts.rewriteJs ? (opts.isModule ? "mod:" : "js:") : "raw:"}${opts.url}`
       : "";
@@ -4306,12 +4449,18 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     }
 
     const runWork = (async () => {
-      const priority = opts.priority || classifyRequestPriority(opts);
-      const lane = priority === "low" ? "bulk" : "fast";
+      const isVideoPlayback = /\.googlevideo\.com\/videoplayback\b/i.test(String(opts.url || ""));
+      const priority = isVideoPlayback
+        ? "low"
+        : ((opts.priority && opts.priority !== "normal") ? opts.priority : classifyRequestPriority(opts));
+      const lane = (isVideoPlayback || priority === "low") ? "bulk" : "fast";
       const timeoutMs = opts.rewriteJs ? 30000 : (isFaviconUrl(opts.url) ? 4500 : 20000);
       const sessToken = opts.token;
 
       const res = await withRequestSlot(async () => {
+        if (opts.signal && opts.signal.aborted) {
+          throw new DOMException("Aborted", "AbortError");
+        }
         if (sessToken && (!activeSession || activeSession.token !== sessToken)) {
           throw new Error("Request cancelled (page navigated)");
         }
@@ -4322,12 +4471,14 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
           redirect: opts.redirect || "follow",
           referrer: opts.referrer,
           sendOrigin: Boolean(opts.sendOrigin),
+          signal: opts.signal,
           timeoutMs,
           lane
         });
         try {
           return await runOnce();
         } catch (err) {
+          if (opts.signal && opts.signal.aborted) throw err;
           const errText = String(err && err.message || err);
           try {
             const u = new URL(opts.url);
@@ -4342,6 +4493,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
                 redirect: opts.redirect || "follow",
                 referrer: opts.referrer,
                 sendOrigin: Boolean(opts.sendOrigin),
+                signal: opts.signal,
                 timeoutMs: 30000,
                 lane
               });
@@ -4350,9 +4502,10 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
             if (fallbackErr !== err) debugLog(`googlevideo fallback failed: ${String(fallbackErr && fallbackErr.message || fallbackErr).slice(0, 120)}`);
             throw fallbackErr;
           }
-          const isSafeApiPost = reqMethod === "POST" && /\/youtubei\/v1\/(?:browse|next|search|guide|player)|\/api\//i.test(String(opts.url || ""));
-          const canRetryDrop = isIdempotent || (isSafeApiPost && !isLaneSocketHealthy(lane));
-          if (canRetryDrop && /timed out|timeout|abort|Reset|SendRequest|ChannelClosed|Wisp|WebSocket|UnexpectedEof/i.test(errText) && (!sessToken || (activeSession && activeSession.token === sessToken))) {
+          const isSafeApiPost = reqMethod === "POST" && /\/youtubei\/v1\/(?:browse|next|search|guide|player|reel\/reel_item_watch|reel\/reel_watch_sequence|updated_metadata|get_watch)|\/api\//i.test(String(opts.url || ""));
+          const isTransientErr = /timed out|timeout|abort|Reset|SendRequest|ChannelClosed|Wisp|WebSocket|UnexpectedEof|Body read/i.test(errText);
+          const canRetryDrop = isIdempotent || (isSafeApiPost && (!isLaneSocketHealthy(lane) || /Reset|SendRequest|ChannelClosed|Wisp|WebSocket|UnexpectedEof|Body read/i.test(errText)));
+          if (canRetryDrop && isTransientErr && (!opts.signal || !opts.signal.aborted) && (!sessToken || (activeSession && activeSession.token === sessToken))) {
             debugLog(`Retrying ${reqMethod} ${opts.url} after ${errText.slice(0, 60)}`);
             if (!isLaneSocketHealthy(lane)) await getWispTransport(lane).catch(() => { });
             return await runOnce();
@@ -4438,6 +4591,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     const ch = new MessageChannel();
     const hostPort = ch.port1;
     const guestPort = ch.port2;
+    const activeReqControllers = new Map();
 
     const sendFaviconFallback = (reqId, reqUrl) => {
       const pngAb = TRANSPARENT_PNG_BYTES.buffer.slice(
@@ -4500,6 +4654,15 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         return;
       }
 
+      if (msg.type === "cancel" && msg.id) {
+        const ac = activeReqControllers.get(msg.id);
+        if (ac) {
+          activeReqControllers.delete(msg.id);
+          try { ac.abort(new DOMException("Aborted", "AbortError")); } catch { }
+        }
+        return;
+      }
+
       if (msg.type === "request") {
         const reqMethod = String(msg.method || "GET").toUpperCase();
         const isIdempotent = reqMethod === "GET" || reqMethod === "HEAD";
@@ -4521,6 +4684,8 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
           return;
         }
 
+        const reqAc = new AbortController();
+        activeReqControllers.set(msg.id, reqAc);
         try {
           const { entry, fromCache } = await fetchSubresource({
             url: msg.url,
@@ -4533,9 +4698,10 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
             rewriteJs: Boolean(msg.rewriteJs),
             isModule: Boolean(msg.isModule),
             priority: msg.priority,
+            signal: reqAc.signal,
             token
           });
-          if (!activeSession || activeSession.token !== token) return;
+          if (reqAc.signal.aborted || !activeSession || activeSession.token !== token) return;
 
           if (entry.status >= 400) {
             if (isIdempotent && isFaviconUrl(msg.url)) {
@@ -4557,7 +4723,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
 
           postAssetResponse(hostPort, msg.id, entry);
         } catch (err) {
-          if (!activeSession || activeSession.token !== token) return;
+          if (reqAc.signal.aborted || !activeSession || activeSession.token !== token) return;
           if (isIdempotent && isFaviconUrl(msg.url)) {
             sendFaviconFallback(msg.id, msg.url);
             return;
@@ -4568,6 +4734,8 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
             id: msg.id,
             error: err && err.message ? err.message : String(err)
           });
+        } finally {
+          activeReqControllers.delete(msg.id);
         }
       } else if (msg.type === "cookie") {
         try {
@@ -4639,7 +4807,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       }
     };
 
-    return { hostPort, guestPort };
+    return { hostPort, guestPort, reqControllers: activeReqControllers };
   }
 
   window.addEventListener("message", (ev) => {
@@ -4686,8 +4854,8 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
 
     cleanupSession();
     const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
-    const { hostPort, guestPort } = installSessionPortHandler(frameEl, token);
-    activeSession = { token, frameEl, port: hostPort, guestPort, portSent: false, currentUrl: cleanTarget };
+    const { hostPort, guestPort, reqControllers } = installSessionPortHandler(frameEl, token);
+    activeSession = { token, frameEl, port: hostPort, guestPort, reqControllers, portSent: false, currentUrl: cleanTarget };
 
     if (typeof window.startProgress === "function") window.startProgress();
     debugStatus(`Contacting ${cleanTarget} via ${getWispUrl()}...`);
@@ -4770,6 +4938,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     setHistIdx: (i) => { standaloneHistIdx = i; }
   };
 })();
+
 
 </script>
 	</head>
