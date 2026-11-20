@@ -3,34 +3,27 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Waved</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 9 9'%3E%3Crect width='9' height='9' rx='2' fill='%236c8cff'/%3E%3C/svg%3E">
-<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin><link rel="preconnect" href="https://fastly.jsdelivr.net" crossorigin><link rel="preconnect" href="https://gcore.jsdelivr.net" crossorigin><link rel="preconnect" href="https://raw.githubusercontent.com" crossorigin><link rel="preconnect" href="https://wisp.waved.site" crossorigin>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin><link rel="preconnect" href="https://wisp.waved.site" crossorigin>
 <style>html,body{margin:0;height:100%;background:#0a0c10;color:#e5e7eb;font:13px system-ui}#e{position:fixed;inset:0;display:none;place-items:center}#e.on{display:grid}.c{background:#fff1;border:1px solid #fff3;border-radius:14px;padding:18px}.c p{margin:6px 0 12px;color:#94a3b8}.c button{padding:7px 14px;border-radius:9px;border:1px solid #fff4;background:#fff2;color:#fff;cursor:pointer}</style>
 </head>
 <body>
 <div id="e"><div class="c"><b>Couldn't load Waved</b><p>Check connection.</p><button id="r">Retry</button></div></div>
 <script>
 (()=>{
-const V="31feaea",K="waved.launcherCache",VK="waved.launcherVer";
-const R=atob("d3c1MTAzNTQzLWJvb3AvU2NyYW1qZXQtQXBw"),F=atob("L3NpbmdsZWZpbGUuaHRtbA=="),G=atob("aHR0cHM6Ly9yYXcuZ2l0aHVidXNlcmNvbnRlbnQuY29tLw=="),N=atob("LmpzZGVsaXZyLm5ldA==");
-const J=(h,r=V)=>"https://"+atob(h)+"/gh/"+R+"@"+r+F,L=(s,r=V)=>"https://"+atob(s)+N+"/gh/"+R+"@"+r+F;
-const W=[
-[L("Y2Ru"),L("ZmFzdGx5"),L("Z2NvcmU="),G+R+"/"+V+F],
-[L("dGVzdGluZ2Nm"),J("anNkZWxpdnIuYi1jZG4ubmV0"),L("b3JpZ2luZmFzdGx5"),L("cXVhbnRpbA==")],
-[J("Y2RuLmpzZG1pcnJvci5jbg=="),J("anNkLm9ubWljcm9zb2Z0LmNu"),atob("aHR0cHM6Ly9naHByb3h5Lm5ldC8=")+G+R+"/"+V+F,L("Y2Ru","main"),L("ZmFzdGx5","main"),G+R+"/main"+F]
-];
-const D=document,ok=h=>typeof h=="string"&&h.length>=5e4&&/<html/i.test(h),pin=u=>/(@|\/)[0-9a-f]{7,40}\/singlefile\.html$/i.test(u),kill=c=>{try{c.abort()}catch{}},ls=(k,v)=>{try{return v===undefined?localStorage.getItem(k):v===null?localStorage.removeItem(k):localStorage.setItem(k,v)}catch{}};
+const U=atob("aHR0cHM6Ly9jZG4uanNkZWxpdnIubmV0L2doL3d3NTEwMzU0My1ib29wL1NjcmFtamV0LUFwcEBtYWluL3NpbmdsZWZpbGUuaHRtbA=="),K="waved.launcherCache",VK="waved.launcherVer";
+const D=document,ok=h=>typeof h=="string"&&h.length>=5e4&&/<html/i.test(h),kill=c=>{try{c.abort()}catch{}},ls=(k,v)=>{try{return v===undefined?localStorage.getItem(k):v===null?localStorage.removeItem(k):localStorage.setItem(k,v)}catch{}};
 const idb=(m,fn)=>new Promise((y,n)=>{const q=window.indexedDB?.open("waved_launcher_db",1);if(!q)return n();q.onupgradeneeded=()=>{try{q.result.createObjectStore("cache")}catch{}};q.onerror=n;q.onsuccess=()=>{const d=q.result,tx=d.transaction("cache",m),r=fn(tx.objectStore("cache")),z=f=>()=>{try{d.close()}catch{}f()};m=="readonly"?(r.onsuccess=z(()=>y(r.result)),r.onerror=z(n)):(tx.oncomplete=z(y),tx.onerror=tx.onabort=z(n))}});
 const rc=async()=>{try{const c=await idb("readonly",s=>s.get(K));if(ok(c?.html))return{ver:typeof c.ver=="string"?c.ver:"",html:c.html};if(ok(c))return{ver:"",html:c}}catch{}const c=ls(K);return ok(c)?{ver:ls(VK)||"",html:c}:null};
-const sc=async h=>{try{await idb("readwrite",s=>s.put({ver:V,html:h},K));ls(K,null);ls(VK,null)}catch{ls(K,h);ls(VK,V)}};
+const sc=async(h,v)=>{try{await idb("readwrite",s=>s.put({ver:v||"",html:h},K));ls(K,null);ls(VK,null)}catch{ls(K,h);ls(VK,v||"")}};
 let busy=0,ran=0;
 function run(h){
   if(ran)return;ran=1;
   const s='<script>(()=>{try{var u=(/^http/.test(location.origin)?location.origin:"https://waved.invalid")+"/";if(!/^http/.test(document.URL))["URL","documentURI"].forEach(k=>Object.defineProperty(document,k,{configurable:1,get:()=>u}));["pushState","replaceState"].forEach(k=>{var o=history[k];history[k]=function(){try{return o.apply(this,arguments)}catch{}}})}catch{}})();<\/script>',m=h.match(/<head(\s[^>]*)?>|<!doctype[^>]*>/i),x=m?h.slice(0,m.index+m[0].length)+s+h.slice(m.index+m[0].length):s+h,go=()=>{try{D.open();D.write(x);D.close()}catch{D.documentElement.innerHTML=x;D.querySelectorAll("script").forEach(o=>{const n=D.createElement("script");n[o.src?"src":"textContent"]=o.src||o.textContent;D.body.appendChild(n)})}};
   D.readyState=="loading"?D.addEventListener("DOMContentLoaded",()=>setTimeout(go,0)):setTimeout(go,0);
 }
-const race=u=>new Promise((y,n)=>{let d=0,left=u.length,ac=u.map(()=>new AbortController()),tm=[];u.forEach((url,i)=>{const p=pin(url);tm[i]=setTimeout(()=>kill(ac[i]),4500);fetch(p?url:url+"?v="+Date.now(),{cache:p?"force-cache":"no-store",signal:ac[i].signal}).then(r=>{clearTimeout(tm[i]);if(!r?.ok){if(!d)kill(ac[i]);throw 0}if(d){kill(ac[i]);r.body?.cancel?.().catch(()=>{});return}d=1;ac.forEach((c,j)=>{clearTimeout(tm[j]);if(j!==i)kill(c)});y({r,c:ac[i]})}).catch(e=>{clearTimeout(tm[i]);if(!--left&&!d)n(e)})})});
+const fto=async(method,ms)=>{const ac=new AbortController(),t=setTimeout(()=>kill(ac),ms);try{const r=await fetch(U,{method,cache:"no-store",signal:ac.signal});return{r,ac}}catch(e){kill(ac);throw e}finally{clearTimeout(t)}};
 const rt=async(r,c)=>{let t;try{const h=await Promise.race([r.text(),new Promise((_,n)=>t=setTimeout(()=>{kill(c);n()},12000))]);if(!ok(h))throw 0;return h}finally{clearTimeout(t)}};
-const eEl=D.getElementById("e"),boot=async()=>{if(busy||ran)return;busy=1;eEl.classList.remove("on");try{const c=await rc();if(c&&(c.ver==V||!navigator.onLine))return run(c.html);for(const w of W)try{const x=await race(w),h=await rt(x.r,x.c);await sc(h);return run(h)}catch{}if(c)return run(c.html);eEl.classList.add("on")}finally{busy=0}};
+const eEl=D.getElementById("e"),boot=async()=>{if(busy||ran)return;busy=1;eEl.classList.remove("on");try{const c=await rc();if(c&&!navigator.onLine)return run(c.html);if(c?.ver){try{const{r}=await fto("HEAD",3000),tag=r.headers.get("etag")||"";if(r.ok&&tag&&tag===c.ver)return run(c.html);if(!r.ok&&r.status!==405&&r.status!==501)return run(c.html)}catch{return run(c.html)}}try{const{r,ac}=await fto("GET",4500);if(!r.ok){kill(ac);throw 0}const tag=r.headers.get("etag")||"",h=await rt(r,ac);await sc(h,tag);return run(h)}catch{}if(c)return run(c.html);eEl.classList.add("on")}finally{busy=0}};
 D.getElementById("r").onclick=boot;boot();
 })();
 </script>
