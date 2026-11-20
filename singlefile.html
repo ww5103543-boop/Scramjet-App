@@ -2117,25 +2117,6 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       } catch { }
     }
     patchHistoryWindow(win);
-    for (const propName of ["contentWindow", "contentDocument"]) {
-      try {
-        const desc = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, propName);
-        if (desc && typeof desc.get === "function") {
-          Object.defineProperty(HTMLIFrameElement.prototype, propName, {
-            configurable: true,
-            enumerable: desc.enumerable,
-            get() {
-              const val = desc.get.call(this);
-              try {
-                const targetWin = propName === "contentWindow" ? val : (val && val.defaultView);
-                if (targetWin) patchHistoryWindow(targetWin);
-              } catch { }
-              return val;
-            }
-          });
-        }
-      } catch { }
-    }
 
     // Always appear online inside guest frame and suppress synthetic offline events
     try {
@@ -2153,15 +2134,11 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     try { Object.defineProperty(win, "onoffline", { configurable: true, get: () => null, set: () => { } }); } catch { }
 
     // Safe Storage & Opaque-Origin In-Memory IndexedDB Shim (prevents TikTok SecurityError rejections)
-    ["localStorage", "sessionStorage"].forEach((name) => {
-      try {
-        const testKey = "__wisp_st_test__";
-        win[name].setItem(testKey, "1");
-        win[name].removeItem(testKey);
-        return;
-      } catch { }
+    const fakeStorages = Object.create(null);
+    let fakeIdbInstance = null;
+    const createMemoryStorage = () => {
       const storeMap = new Map();
-      const fake = {
+      return {
         getItem: (k) => (storeMap.has(String(k)) ? storeMap.get(String(k)) : null),
         setItem: (k, v) => { storeMap.set(String(k), String(v)); },
         removeItem: (k) => { storeMap.delete(String(k)); },
@@ -2169,6 +2146,16 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         key: (i) => Array.from(storeMap.keys())[i] ?? null,
         get length() { return storeMap.size; }
       };
+    };
+    ["localStorage", "sessionStorage"].forEach((name) => {
+      try {
+        const testKey = "__wisp_st_test__";
+        win[name].setItem(testKey, "1");
+        win[name].removeItem(testKey);
+        return;
+      } catch { }
+      const fake = createMemoryStorage();
+      fakeStorages[name] = fake;
       try {
         Object.defineProperty(win, name, { get: () => fake, configurable: true });
       } catch { }
@@ -2650,26 +2637,149 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
           return req;
         }
       });
+      fakeIdbInstance = fakeIDB;
       try {
-        Object.defineProperty(win, "indexedDB", { value: fakeIDB, configurable: true });
+        Object.defineProperty(win, "indexedDB", { get: () => fakeIDB, configurable: true });
+      } catch { }
+      try {
+        const proto = Object.getPrototypeOf(win);
+        if (proto) Object.defineProperty(proto, "indexedDB", { get: () => fakeIDB, configurable: true });
+      } catch { }
+      try {
+        if (typeof Window !== "undefined" && Window.prototype) {
+          Object.defineProperty(Window.prototype, "indexedDB", { get: () => fakeIDB, configurable: true });
+        }
       } catch { }
     })();
 
     // Spoof Document & Window properties directly in real global environment
-    try {
-      Object.defineProperty(Document.prototype, "cookie", {
-        configurable: true,
-        get: () => curCookies,
-        set: (val) => {
-          const first = String(val).split(";")[0];
-          const eq = first.indexOf("=");
-          if (eq > 0) {
-            const k = first.slice(0, eq).trim();
-            curCookies = curCookies.split(/;\s*/).filter((c) => c && c.split("=")[0] !== k).concat(first.trim()).join("; ");
-            sendToParent({ type: "cookie", value: String(val), url: curUrl });
-          }
+    const cookiePropDef = {
+      configurable: true,
+      get: () => curCookies,
+      set: (val) => {
+        const first = String(val).split(";")[0];
+        const eq = first.indexOf("=");
+        if (eq > 0) {
+          const k = first.slice(0, eq).trim();
+          curCookies = curCookies.split(/;\s*/).filter((c) => c && c.split("=")[0] !== k).concat(first.trim()).join("; ");
+          sendToParent({ type: "cookie", value: String(val), url: curUrl });
         }
-      });
+      }
+    };
+    try {
+      Object.defineProperty(Document.prototype, "cookie", cookiePropDef);
+    } catch { }
+
+    const patchedChildWins = new WeakSet();
+    function patchChildRealm(targetWin) {
+      try {
+        if (!targetWin || targetWin === win || patchedChildWins.has(targetWin)) return;
+        patchedChildWins.add(targetWin);
+      } catch {
+        return;
+      }
+      patchHistoryWindow(targetWin);
+      for (const name of ["localStorage", "sessionStorage"]) {
+        try {
+          let fake = fakeStorages[name];
+          if (!fake) {
+            try {
+              const testKey = "__wisp_st_test__";
+              targetWin[name].setItem(testKey, "1");
+              targetWin[name].removeItem(testKey);
+            } catch {
+              fake = fakeStorages[name] = createMemoryStorage();
+            }
+          }
+          if (!fake) continue;
+          const desc = { get: () => fake, configurable: true };
+          try { Object.defineProperty(targetWin, name, desc); } catch { }
+          try {
+            const proto = Object.getPrototypeOf(targetWin);
+            if (proto) Object.defineProperty(proto, name, desc);
+          } catch { }
+          try {
+            if (targetWin.Window && targetWin.Window.prototype) {
+              Object.defineProperty(targetWin.Window.prototype, name, desc);
+            }
+          } catch { }
+        } catch { }
+      }
+      if (fakeIdbInstance) {
+        const idbDesc = { get: () => fakeIdbInstance, configurable: true };
+        try { Object.defineProperty(targetWin, "indexedDB", idbDesc); } catch { }
+        try {
+          const proto = Object.getPrototypeOf(targetWin);
+          if (proto) Object.defineProperty(proto, "indexedDB", idbDesc);
+        } catch { }
+        try {
+          if (targetWin.Window && targetWin.Window.prototype) {
+            Object.defineProperty(targetWin.Window.prototype, "indexedDB", idbDesc);
+          }
+        } catch { }
+      }
+      try {
+        if (targetWin.Document && targetWin.Document.prototype) {
+          Object.defineProperty(targetWin.Document.prototype, "cookie", cookiePropDef);
+        }
+      } catch { }
+      try {
+        if (targetWin.Navigator && targetWin.Navigator.prototype) {
+          Object.defineProperty(targetWin.Navigator.prototype, "onLine", { configurable: true, get: () => true });
+        }
+      } catch { }
+    }
+    function patchAllChildFrames() {
+      for (let i = 0; i < win.length; i++) {
+        try { patchChildRealm(win[i]); } catch { }
+      }
+    }
+    for (const propName of ["contentWindow", "contentDocument"]) {
+      try {
+        const desc = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, propName);
+        if (desc && typeof desc.get === "function") {
+          Object.defineProperty(HTMLIFrameElement.prototype, propName, {
+            configurable: true,
+            enumerable: desc.enumerable,
+            get() {
+              const val = desc.get.call(this);
+              try {
+                const targetWin = propName === "contentWindow" ? val : (val && val.defaultView);
+                if (targetWin) patchChildRealm(targetWin);
+              } catch { }
+              return val;
+            }
+          });
+        }
+      } catch { }
+    }
+    try {
+      const origAppendChild = Node.prototype.appendChild;
+      if (typeof origAppendChild === "function") {
+        Node.prototype.appendChild = function (node) {
+          const res = origAppendChild.call(this, node);
+          if (win.length > 0) patchAllChildFrames();
+          return res;
+        };
+      }
+      const origInsertBefore = Node.prototype.insertBefore;
+      if (typeof origInsertBefore === "function") {
+        Node.prototype.insertBefore = function (node, ref) {
+          const res = origInsertBefore.call(this, node, ref);
+          if (win.length > 0) patchAllChildFrames();
+          return res;
+        };
+      }
+      for (const m of ["append", "prepend"]) {
+        const origElMethod = Element.prototype[m];
+        if (typeof origElMethod === "function") {
+          Element.prototype[m] = function (...args) {
+            const res = origElMethod.apply(this, args);
+            if (win.length > 0) patchAllChildFrames();
+            return res;
+          };
+        }
+      }
     } catch { }
 
     const defineDocProp = (prop, getFn, setFn) => {
