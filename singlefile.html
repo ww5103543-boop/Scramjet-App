@@ -1152,7 +1152,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
 
   class WispCookieJar {
     constructor() {
-      /** @type {Map<string, {name:string,value:string,domain:string,path:string,hostOnly:boolean,secure:boolean,expires:number,createdAt:number,seq:number}>} */
+      /** @type {Map<string, {name:string,value:string,domain:string,path:string,hostOnly:boolean,secure:boolean,httpOnly:boolean,expires:number,createdAt:number,seq:number}>} */
       this.store = new Map();
       this._saveTimer = 0;
       this._seq = 0;
@@ -1175,6 +1175,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
             entry.val.expires > now &&
             (String(entry.val.name || "").length + String(entry.val.value || "").length) <= MAX_COOKIE_BYTES
           ) {
+            entry.val.httpOnly = Boolean(entry.val.httpOnly);
             entry.val.createdAt = Number(entry.val.createdAt) || now;
             entry.val.seq = ++this._seq;
             this.store.set(entry.key, entry.val);
@@ -1249,7 +1250,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       return false;
     }
 
-    setCookie(rawCookie, urlObj) {
+    setCookie(rawCookie, urlObj, fromJs = false) {
       if (!rawCookie || typeof rawCookie !== "string") return;
       const parts = rawCookie.split(";").map((s) => s.trim()).filter(Boolean);
       if (!parts.length) return;
@@ -1264,6 +1265,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       const slashIdx = urlObj.pathname.lastIndexOf("/");
       let cookiePath = slashIdx > 0 ? urlObj.pathname.slice(0, slashIdx) : "/";
       let secure = false;
+      let httpOnly = false;
       let expires = Infinity;
       let hasMaxAge = false;
 
@@ -1282,6 +1284,8 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
           cookiePath = v;
         } else if (k === "secure") {
           secure = true;
+        } else if (k === "httponly") {
+          if (!fromJs) httpOnly = true;
         } else if (k === "max-age") {
           const secs = parseInt(v, 10);
           if (!Number.isNaN(secs)) {
@@ -1296,6 +1300,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
 
       const now = Date.now();
       const key = `${domain}\t${cookiePath}\t${name}`;
+      if (fromJs && this.store.get(key)?.httpOnly) return;
       if (expires <= now) {
         if (this.store.delete(key)) this._schedulePersist();
         return;
@@ -1309,6 +1314,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         path: cookiePath,
         hostOnly,
         secure,
+        httpOnly,
         expires,
         createdAt: now,
         seq: ++this._seq
@@ -1318,16 +1324,19 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     }
 
     ingestHeaders(headersEntries, urlObj) {
-      if (!Array.isArray(headersEntries)) return;
+      if (!Array.isArray(headersEntries)) return false;
+      let ingested = false;
       for (const entry of headersEntries) {
         if (!entry || entry.length < 2) continue;
         if (String(entry[0]).toLowerCase() === "set-cookie") {
           this.setCookie(String(entry[1]), urlObj);
+          ingested = true;
         }
       }
+      return ingested;
     }
 
-    getCookieString(urlObj) {
+    getCookieString(urlObj, includeHttpOnly = true) {
       const now = Date.now();
       const matched = [];
       for (const [key, c] of this.store.entries()) {
@@ -1335,6 +1344,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
           this.store.delete(key);
           continue;
         }
+        if (!includeHttpOnly && c.httpOnly) continue;
         if (c.secure && urlObj.protocol !== "https:") continue;
         if (!this._domainMatches(urlObj.hostname, c.domain, c.hostOnly)) continue;
         if (!this._pathMatches(urlObj.pathname || "/", c.path)) continue;
@@ -1701,15 +1711,49 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     if (!map.has("accept")) {
       put("accept", "*/*");
     }
+    let refOrigin = "";
     if (typeof defaultReferer === "string" && /^https?:\/\//i.test(defaultReferer)) {
       if (!map.has("referer")) put("referer", defaultReferer);
-      const upperM = String(method || "GET").toUpperCase();
-      if (!map.has("origin") && ((upperM !== "GET" && upperM !== "HEAD") || sendOrigin)) {
-        try {
-          const refOrigin = new URL(defaultReferer).origin;
-          if (refOrigin && refOrigin !== "null") put("origin", refOrigin);
-        } catch { }
-      }
+      try { refOrigin = new URL(defaultReferer).origin; } catch { }
+    }
+    const upperM = String(method || "GET").toUpperCase();
+    const isSameOrigin = Boolean(refOrigin && refOrigin !== "null" && refOrigin === targetUrlObj.origin);
+    if (!map.has("origin") && refOrigin && refOrigin !== "null" &&
+        ((upperM !== "GET" && upperM !== "HEAD") || sendOrigin === "always" || (sendOrigin && !isSameOrigin))) {
+      put("origin", refOrigin);
+    }
+    const uaVal = (map.get("user-agent") && map.get("user-agent")[1]) || getCleanUserAgent();
+    const cm = /Chrome\/(\d+)/.exec(uaVal);
+    const chMaj = cm ? cm[1] : "131";
+    if (!map.has("sec-ch-ua")) {
+      map.set("sec-ch-ua", ["sec-ch-ua", `"Google Chrome";v="${chMaj}", "Chromium";v="${chMaj}", "Not_A Brand";v="24"`]);
+      map.set("sec-ch-ua-mobile", ["sec-ch-ua-mobile", "?0"]);
+      map.set("sec-ch-ua-platform", ["sec-ch-ua-platform", '"Windows"']);
+    }
+    let sfSite = !refOrigin || refOrigin === "null" ? "cross-site" : (isSameOrigin ? "same-origin" : "cross-site");
+    if (refOrigin && refOrigin !== "null" && !isSameOrigin) {
+      try {
+        const rh = new URL(defaultReferer).hostname.split(".").slice(-2).join(".");
+        const th = targetUrlObj.hostname.split(".").slice(-2).join(".");
+        if (rh && rh === th) sfSite = "same-site";
+      } catch { }
+    }
+    const acceptHdr = (map.get("accept") && map.get("accept")[1]) || "";
+    const isDocNav = !sendOrigin && /\btext\/html\b/i.test(acceptHdr);
+    if (isDocNav) {
+      map.set("sec-fetch-site", ["sec-fetch-site", refOrigin && refOrigin !== "null" ? sfSite : "none"]);
+      map.set("sec-fetch-mode", ["sec-fetch-mode", "navigate"]);
+      map.set("sec-fetch-dest", ["sec-fetch-dest", "document"]);
+    } else if (sendOrigin) {
+      map.set("sec-fetch-site", ["sec-fetch-site", sfSite]);
+      map.set("sec-fetch-mode", ["sec-fetch-mode", "cors"]);
+      map.set("sec-fetch-dest", ["sec-fetch-dest", "empty"]);
+    } else {
+      const p = targetUrlObj.pathname;
+      const dest = /\.(?:m?js)(?:[?#]|$)/i.test(p) ? "script" : (/\.css(?:[?#]|$)/i.test(p) ? "style" : "empty");
+      map.set("sec-fetch-site", ["sec-fetch-site", sfSite]);
+      map.set("sec-fetch-mode", ["sec-fetch-mode", "no-cors"]);
+      map.set("sec-fetch-dest", ["sec-fetch-dest", dest]);
     }
     if (!map.has("cookie")) {
       const ck = cookieJar.getCookieString(targetUrlObj);
@@ -1751,6 +1795,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     const timeoutMs = Number(opts.timeoutMs) || 20000;
     const lane = opts.lane === "bulk" ? "bulk" : "fast";
     let redirected = false;
+    let hadSetCookie = false;
 
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
       const urlObj = new URL(curUrl);
@@ -1758,7 +1803,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         throw new TypeError("Unsupported protocol: " + urlObj.protocol);
       }
 
-      const headerTuples = normalizeRequestHeaders(opts.headers, urlObj, opts.referrer, method, Boolean(opts.sendOrigin));
+      const headerTuples = normalizeRequestHeaders(opts.headers, urlObj, opts.referrer, method, opts.sendOrigin || false);
       let res = null;
       let resHeaders = [];
       let status = 0;
@@ -1824,7 +1869,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         }
       }
 
-      cookieJar.ingestHeaders(resHeaders, urlObj);
+      if (cookieJar.ingestHeaders(resHeaders, urlObj)) hadSetCookie = true;
 
       if (isRedirect) {
         const loc = getHeaderValue(resHeaders, "location");
@@ -1847,7 +1892,8 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         headers: resHeaders,
         bodyBytes,
         finalUrl: curUrl,
-        redirected
+        redirected,
+        hadSetCookie
       };
     }
 
@@ -1926,6 +1972,8 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     const pendingSockets = new Map();
     const blobUrlCache = new Map();
     const hydratedEls = new WeakSet();
+    const executedScriptUrls = new Set();
+    const isWebmssdkUrl = (u) => /\/webmssdk(?:_ex)?\.js(?:[?#]|$)/i.test(String(u || ""));
 
     function sendToParent(msg, transfer) {
       if (port) {
@@ -2232,12 +2280,21 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     } catch { }
     try { Object.defineProperty(win, "onoffline", { configurable: true, get: () => null, set: () => { } }); } catch { }
 
+    const applyNavigatorUa = (nav) => {
+      try {
+        if (!nav || typeof init.userAgent !== "string" || !init.userAgent) return;
+        Object.defineProperty(nav, "userAgent", { configurable: true, get: () => init.userAgent });
+        Object.defineProperty(nav, "appVersion", { configurable: true, get: () => init.userAgent.replace(/^Mozilla\//, "") });
+      } catch { }
+    };
+    applyNavigatorUa(Navigator.prototype);
+
     // Safe Storage & Opaque-Origin In-Memory IndexedDB Shim (prevents TikTok SecurityError rejections)
     const fakeStorages = Object.create(null);
     let fakeIdbInstance = null;
     const createMemoryStorage = () => {
       const storeMap = new Map();
-      return {
+      const api = {
         getItem: (k) => (storeMap.has(String(k)) ? storeMap.get(String(k)) : null),
         setItem: (k, v) => { storeMap.set(String(k), String(v)); },
         removeItem: (k) => { storeMap.delete(String(k)); },
@@ -2245,6 +2302,31 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         key: (i) => Array.from(storeMap.keys())[i] ?? null,
         get length() { return storeMap.size; }
       };
+      return new Proxy(api, {
+        get(t, p) {
+          if (typeof p !== "string") return Reflect.get(t, p);
+          if (Object.prototype.hasOwnProperty.call(t, p)) return typeof t[p] === "function" ? t[p] : t[p];
+          return storeMap.has(p) ? storeMap.get(p) : undefined;
+        },
+        set(t, p, v) {
+          if (typeof p === "string" && !Object.prototype.hasOwnProperty.call(t, p)) storeMap.set(p, String(v));
+          return true;
+        },
+        deleteProperty(t, p) {
+          if (typeof p === "string") storeMap.delete(p);
+          return true;
+        },
+        has(t, p) {
+          return Object.prototype.hasOwnProperty.call(t, p) || (typeof p === "string" && storeMap.has(p));
+        },
+        ownKeys() { return Array.from(storeMap.keys()); },
+        getOwnPropertyDescriptor(t, p) {
+          if (typeof p === "string" && storeMap.has(p)) {
+            return { configurable: true, enumerable: true, writable: true, value: storeMap.get(p) };
+          }
+          return undefined;
+        }
+      });
     };
     ["localStorage", "sessionStorage"].forEach((name) => {
       try {
@@ -2808,8 +2890,14 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     const patchedChildWins = new WeakSet();
     function patchChildRealm(targetWin) {
       try {
-        if (!targetWin || targetWin === win || patchedChildWins.has(targetWin)) return;
-        patchedChildWins.add(targetWin);
+        if (!targetWin || targetWin === win) return;
+        if (targetWin.__wispRealmPatched === true) return;
+        try {
+          Object.defineProperty(targetWin, "__wispRealmPatched", { value: true, configurable: true, enumerable: false, writable: true });
+        } catch {
+          if (patchedChildWins.has(targetWin)) return;
+          patchedChildWins.add(targetWin);
+        }
       } catch {
         return;
       }
@@ -2861,12 +2949,55 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       try {
         if (targetWin.Navigator && targetWin.Navigator.prototype) {
           Object.defineProperty(targetWin.Navigator.prototype, "onLine", { configurable: true, get: () => true });
+          applyNavigatorUa(targetWin.Navigator.prototype);
+        }
+      } catch { }
+      try {
+        if (targetWin.HTMLIFrameElement && targetWin.HTMLIFrameElement.prototype) {
+          for (const pn of ["contentWindow", "contentDocument"]) {
+            const d2 = Object.getOwnPropertyDescriptor(targetWin.HTMLIFrameElement.prototype, pn);
+            if (d2 && typeof d2.get === "function") {
+              Object.defineProperty(targetWin.HTMLIFrameElement.prototype, pn, {
+                configurable: true,
+                enumerable: d2.enumerable,
+                get() {
+                  const v = d2.get.call(this);
+                  try {
+                    const tw = pn === "contentWindow" ? v : (v && v.defaultView);
+                    if (tw) patchChildRealm(tw);
+                  } catch { }
+                  return v;
+                }
+              });
+            }
+          }
+        }
+        if (targetWin.Node && targetWin.Node.prototype) {
+          for (const nm of ["appendChild", "insertBefore"]) {
+            const orig = targetWin.Node.prototype[nm];
+            if (typeof orig === "function") {
+              targetWin.Node.prototype[nm] = function (...args) {
+                const r = orig.apply(this, args);
+                patchAllChildFrames(targetWin, 1);
+                return r;
+              };
+            }
+          }
         }
       } catch { }
     }
-    function patchAllChildFrames() {
-      for (let i = 0; i < win.length; i++) {
-        try { patchChildRealm(win[i]); } catch { }
+    function patchAllChildFrames(rootWin = win, depth = 0) {
+      if (depth > 3) return;
+      let len = 0;
+      try { len = rootWin.length || 0; } catch { return; }
+      for (let i = 0; i < len; i++) {
+        try {
+          const cw = rootWin[i];
+          if (cw) {
+            patchChildRealm(cw);
+            patchAllChildFrames(cw, depth + 1);
+          }
+        } catch { }
       }
     }
     for (const propName of ["contentWindow", "contentDocument"]) {
@@ -2905,7 +3036,31 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
           return res;
         };
       }
-      for (const m of ["append", "prepend"]) {
+      const origReplaceChild = Node.prototype.replaceChild;
+      if (typeof origReplaceChild === "function") {
+        Node.prototype.replaceChild = function (n, o) {
+          const res = origReplaceChild.call(this, n, o);
+          if (win.length > 0) patchAllChildFrames();
+          return res;
+        };
+      }
+      for (const prop of ["innerHTML", "outerHTML"]) {
+        try {
+          const hd = Object.getOwnPropertyDescriptor(Element.prototype, prop);
+          if (hd && typeof hd.set === "function") {
+            Object.defineProperty(Element.prototype, prop, {
+              configurable: true,
+              enumerable: hd.enumerable,
+              get: hd.get,
+              set(v) {
+                hd.set.call(this, v);
+                if (win.length > 0) patchAllChildFrames();
+              }
+            });
+          }
+        } catch { }
+      }
+      for (const m of ["append", "prepend", "after", "before", "replaceWith", "insertAdjacentElement", "insertAdjacentHTML"]) {
         const origElMethod = Element.prototype[m];
         if (typeof origElMethod === "function") {
           Element.prototype[m] = function (...args) {
@@ -3544,6 +3699,13 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
     async function runDynamicExternalScript(scriptEl, srcUrl) {
       const abs = resolveVirtualUrl(srcUrl);
       native.setAttribute.call(scriptEl, "data-wisp-src", abs);
+      if (isWebmssdkUrl(abs)) {
+        if (executedScriptUrls.has(abs)) {
+          native.setTimeout(() => scriptEl.dispatchEvent(new Event("load")), 0);
+          return;
+        }
+        executedScriptUrls.add(abs);
+      }
       const isMod = (native.getAttribute.call(scriptEl, "type") || "").toLowerCase() === "module";
       try {
         const msg = await wispRpcFetch(abs, { method: "GET", rewriteJs: true, isModule: isMod });
@@ -3805,9 +3967,17 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         const placeholderEl = doc.querySelector(`script[data-wisp-script="${s.id}"]`);
         const isMod = String(s.type).toLowerCase() === "module";
         const runItem = async () => {
+          if (s.src && isWebmssdkUrl(s.src)) {
+            if (executedScriptUrls.has(s.src)) {
+              if (placeholderEl) placeholderEl.dispatchEvent(new Event("load"));
+              return;
+            }
+            executedScriptUrls.add(s.src);
+          }
           const code = s.src ? await scriptPrefetch.get(s.id) : s.code;
           if (typeof code === "string" && code.length) {
             await executeJsCode(code, s.src || curUrl, placeholderEl, isMod);
+            if (s.src && placeholderEl) placeholderEl.dispatchEvent(new Event("load"));
           }
         };
         if (isMod || s.defer) {
@@ -4032,7 +4202,8 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       token,
       url: finalUrl,
       baseUrl: docBaseUrl,
-      cookies: cookieJar.getCookieString(new URL(finalUrl)),
+      cookies: cookieJar.getCookieString(new URL(finalUrl), false),
+      userAgent: getCleanUserAgent(),
       referrer: /^https?:\/\//i.test(referrerUrl || "") ? referrerUrl : "",
       scripts,
       metaRefresh
@@ -4440,12 +4611,23 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       if (idbHit) return { entry: idbHit, fromCache: true };
     }
 
-    const canDedupe = isIdempotent && !opts.body && !opts.signal && !hasRangeHeader(opts.headers);
-    const inFlightKey = canDedupe
+    const canLookup = isIdempotent && !opts.body && !hasRangeHeader(opts.headers);
+    const canStore = canLookup && !opts.signal;
+    const inFlightKey = canLookup
       ? `${opts.token || "global"}:${reqMethod}:${opts.rewriteJs ? (opts.isModule ? "mod:" : "js:") : "raw:"}${opts.url}`
       : "";
     if (inFlightKey && inFlightRequests.has(inFlightKey)) {
-      return inFlightRequests.get(inFlightKey);
+      const shared = inFlightRequests.get(inFlightKey);
+      if (!opts.signal) return shared;
+      if (opts.signal.aborted) throw new DOMException("Aborted", "AbortError");
+      return await new Promise((resolve, reject) => {
+        const onAbort = () => reject(new DOMException("Aborted", "AbortError"));
+        opts.signal.addEventListener("abort", onAbort, { once: true });
+        shared.then(
+          (v) => { opts.signal.removeEventListener("abort", onAbort); resolve(v); },
+          (e) => { opts.signal.removeEventListener("abort", onAbort); reject(e); }
+        );
+      });
     }
 
     const runWork = (async () => {
@@ -4530,6 +4712,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         headers: res.headers,
         bodyBytes,
         codeStr,
+        hadSetCookie: Boolean(res.hadSetCookie),
         size: typeof codeStr === "string" ? codeStr.length : (bodyBytes ? bodyBytes.byteLength : 0)
       };
 
@@ -4542,7 +4725,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       return { entry, fromCache: false };
     })();
 
-    if (inFlightKey) {
+    if (inFlightKey && canStore) {
       inFlightRequests.set(inFlightKey, runWork);
       runWork.finally(() => {
         if (inFlightRequests.get(inFlightKey) === runWork) {
@@ -4554,9 +4737,12 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
   }
 
   function postAssetResponse(port, reqId, entry) {
-    let cookies = "";
+    let cookies = null;
     try {
-      cookies = cookieJar.getCookieString(new URL(entry.url));
+      const docUrl = activeSession && activeSession.currentUrl;
+      if (docUrl && (entry.hadSetCookie || getHeaderValue(entry.headers, "set-cookie"))) {
+        cookies = cookieJar.getCookieString(new URL(docUrl), false);
+      }
     } catch { }
     if (typeof entry.codeStr === "string") {
       port.postMessage({
@@ -4606,7 +4792,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         url: reqUrl,
         redirected: false,
         headers: [["content-type", "image/png"]],
-        cookies: "",
+        cookies: null,
         body: pngAb
       }, [pngAb]);
     };
@@ -4678,7 +4864,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
             url: msg.url,
             redirected: false,
             headers: [],
-            cookies: "",
+            cookies: null,
             body: emptyBuf
           }, [emptyBuf]);
           return;
@@ -4739,7 +4925,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
         }
       } else if (msg.type === "cookie") {
         try {
-          cookieJar.setCookie(msg.value, new URL(msg.url));
+          cookieJar.setCookie(msg.value, new URL(msg.url), true);
         } catch { }
       } else if (msg.type === "navigate") {
         renderStandaloneProxyPage(frameEl, msg.url, true, {
@@ -4748,6 +4934,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
           contentType: msg.contentType || ""
         });
       } else if (msg.type === "history" && msg.url) {
+        if (activeSession) activeSession.currentUrl = msg.url;
         const addrEl = document.getElementById("address");
         if (addrEl) addrEl.value = msg.url;
         if (standaloneHistory[standaloneHistIdx] !== msg.url) {
@@ -4768,7 +4955,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
           const transport = await getWispTransport();
           const wsUrl = new URL(msg.url);
           const wsReqUrl = new URL(wsUrl.href.replace(/^ws/i, "http"));
-          const wsHeaders = normalizeRequestHeaders([], wsReqUrl, msg.referrer || activeSession.currentUrl || "", "GET", true);
+          const wsHeaders = normalizeRequestHeaders([], wsReqUrl, msg.referrer || activeSession.currentUrl || "", "GET", "always");
           const pair = transport.connect(
             wsUrl,
             msg.protocols || [],
@@ -4894,6 +5081,7 @@ window.initBootstrap = async function initBootstrap(userConfig = {}) {
       debugStatus(`${res.status} ${res.statusText || "OK"} - ${res.finalUrl} (${res.bodyBytes.byteLength} B)`);
 
       if (res.finalUrl && res.finalUrl !== cleanTarget) {
+        if (activeSession) activeSession.currentUrl = res.finalUrl;
         standaloneHistory[standaloneHistIdx] = res.finalUrl;
         if (addrEl) addrEl.value = res.finalUrl;
       }
