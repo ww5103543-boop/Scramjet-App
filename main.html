@@ -22,8 +22,8 @@ function run(h){
   D.readyState=="loading"?D.addEventListener("DOMContentLoaded",()=>setTimeout(go,0)):setTimeout(go,0);
 }
 const fto=async(method,ms)=>{const ac=new AbortController(),t=setTimeout(()=>kill(ac),ms);try{const r=await fetch(U,{method,cache:"no-store",signal:ac.signal});return{r,ac}}catch(e){kill(ac);throw e}finally{clearTimeout(t)}};
-const rt=async(r,c)=>{let t;try{const h=await Promise.race([r.text(),new Promise((_,n)=>t=setTimeout(()=>{kill(c);n()},12000))]);if(!ok(h))throw 0;return h}finally{clearTimeout(t)}};
-const eEl=D.getElementById("e"),boot=async()=>{if(busy||ran)return;busy=1;eEl.classList.remove("on");try{const c=await rc();if(c&&!navigator.onLine)return run(c.html);if(c?.ver){try{const{r}=await fto("HEAD",3000),tag=r.headers.get("etag")||"";if(r.ok&&tag&&tag===c.ver)return run(c.html);if(!r.ok&&r.status!==405&&r.status!==501)return run(c.html)}catch{return run(c.html)}}try{const{r,ac}=await fto("GET",4500);if(!r.ok){kill(ac);throw 0}const tag=r.headers.get("etag")||"",h=await rt(r,ac);await sc(h,tag);return run(h)}catch{}if(c)return run(c.html);eEl.classList.add("on")}finally{busy=0}};
+const rt=async(r,c)=>{let t;try{const h=await Promise.race([r.text(),new Promise((_,n)=>t=setTimeout(()=>{kill(c);n()},20000))]);if(!ok(h))throw 0;return h}finally{clearTimeout(t)}};
+const eEl=D.getElementById("e"),boot=async()=>{if(busy||ran)return;busy=1;eEl.classList.remove("on");try{const c=await rc();if(c&&!navigator.onLine)return run(c.html);if(c?.ver){try{const{r}=await fto("HEAD",4000),tag=r.headers.get("etag")||"";if(r.ok&&tag&&tag===c.ver)return run(c.html);if(!r.ok&&r.status!==405&&r.status!==501)return run(c.html)}catch{return run(c.html)}}try{const{r,ac}=await fto("GET",9000);if(!r.ok){kill(ac);throw 0}const tag=r.headers.get("etag")||"",h=await rt(r,ac);await sc(h,tag);return run(h)}catch{}if(c)return run(c.html);eEl.classList.add("on")}finally{busy=0}};
 D.getElementById("r").onclick=boot;boot();
 })();
 </script>
